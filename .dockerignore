@@ -1,4 +1,6 @@
-.github
+/.github
 .DS_Store
-README.md
-LICENSE
+/README.md
+/LICENSE
+/.git
+/.idea
