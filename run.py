@@ -26,7 +26,7 @@ AWS_DEFAULT_REGION = os.environ.get('AWS_DEFAULT_REGION')
 
 # Setup logging
 logger = logging.getLogger()
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.INFO)
 logger.addHandler(logging.StreamHandler())
 
 
@@ -119,7 +119,7 @@ def main() -> None:
     # Open gzip process for piping
     try:
         with open(destination, 'wb') as f:
-            logger.debug(f"Starting mysqldump process: {' '.join(mysqldump_cmd)}")
+            logger.debug("Starting mysqldump process")
             mysqldump_process = subprocess.Popen(mysqldump_cmd, stdout=subprocess.PIPE)
             gzip_process = subprocess.Popen(['gzip', '-c'], stdin=mysqldump_process.stdout, stdout=f)
 
