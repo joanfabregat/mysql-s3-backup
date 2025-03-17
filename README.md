@@ -6,24 +6,26 @@ This repository contains a script to backup a MySQL database to an S3 bucket.
 
 The script is intended to be run as a cron job. It will dump the database to a file and upload it to an S3 bucket.
 
-The script is packaged as a Docker image. The image is available on Docker Hub as [`joanfabregat/mysql-s3-backup`](https://hub.docker.com/repository/docker/joanfabregat/mysql-s3-backup/).
+The script is packaged as a Docker image. The image is available on Docker Hub as [
+`joanfabregat/mysql-s3-backup`](https://hub.docker.com/repository/docker/joanfabregat/mysql-s3-backup/).
 
 ## Configuration
 
 The script is configured using environment variables.
 
-| Environment variables   | Description       | Default    |
-|-------------------------|-------------------|------------|
-| `MYSQL_HOST`            | MySQL host        | *required* |
-| `MYSQL_PORT`            | MySQL port        | `3306`     |
-| `MYSQL_USER`            | MySQL user        | *required* |
-| `MYSQL_PASSWORD`        | MySQL password    | *required* |
-| `MYSQL_DATABASE`        | MySQL database    | *required* |
-| `S3_BUCKET`             | S3 bucket         | *required* |
-| `S3_PREFIX`             | S3 prefix         | `/`        |
-| `AWS_ACCESS_KEY_ID`     | AWS access key ID | *required* |
-| `AWS_SECRET_ACCESS_KEY` | AWS secret        | *required* |
-| `AWS_DEFAULT_REGION`    | AWS region        | *required* |
+| Environment variables   | Description                               | Default                                      |
+|-------------------------|-------------------------------------------|----------------------------------------------|
+| `DATABASE_URL`          | Database URL (must start with `mysql://`) | *required* if `MYSQL_HOST` is not supplied   |
+| `MYSQL_HOST`            | MySQL host                                | *required* if `DATABASE_URL` is not supplied |
+| `MYSQL_PORT`            | MySQL port                                | `3306`                                       |
+| `MYSQL_USER`            | MySQL user                                | *required* if `DATABASE_URL` is not supplied |
+| `MYSQL_PASSWORD`        | MySQL password                            | *required* if `DATABASE_URL` is not supplied |
+| `MYSQL_DATABASE`        | MySQL database                            | *required* if `DATABASE_URL` is not supplied |
+| `S3_BUCKET`             | S3 bucket                                 | *required*                                   |
+| `S3_PREFIX`             | S3 prefix                                 | `/`                                          |
+| `AWS_ACCESS_KEY_ID`     | AWS access key ID                         | *required*                                   |
+| `AWS_SECRET_ACCESS_KEY` | AWS secret                                | *required*                                   |
+| `AWS_REGION`            | AWS region                                | *required*                                   |
 
 ## Kubernetes CRON
 

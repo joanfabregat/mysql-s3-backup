@@ -1,0 +1,12 @@
+[project]
+name = "mysql-s3-backup"
+version = "v2.0.0"
+description = "A simple tool to backup MySQL databases to S3"
+authors = [
+    { name = "Joan Fabrégat", email = "j@fabreg.at" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "boto3>=1.37.13",
+    "tenacity>=9.0.0",
+]
