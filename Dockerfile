@@ -27,7 +27,8 @@ ENV S3_PREFIX=$S3_PREFIX
 
 COPY --from=builder /app/.venv .venv
 ENV PATH="/app/.venv/bin:$PATH"
+ENV PYTHONPATH="/app/src"
 
-COPY run.py .
+COPY src/ src/
 
-CMD ["python", "run.py"]
+CMD ["python", "-m", "mysql_s3_backup"]
