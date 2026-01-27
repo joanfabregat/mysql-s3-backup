@@ -1,29 +1,37 @@
 # MySQL Backup Service
 
 [![Build and push Docker image](https://github.com/joanfabregat/mysql-s3-backup/actions/workflows/docker-image.yml/badge.svg)](https://github.com/joanfabregat/mysql-s3-backup/actions/workflows/docker-image.yml)
+[![Docker Pulls](https://img.shields.io/docker/pulls/joanfabregat/mysql-s3-backup)](https://hub.docker.com/r/joanfabregat/mysql-s3-backup)
+[![Docker Image Size](https://img.shields.io/docker/image-size/joanfabregat/mysql-s3-backup/latest)](https://hub.docker.com/r/joanfabregat/mysql-s3-backup)
+[![GitHub release](https://img.shields.io/github/v/release/joanfabregat/mysql-s3-backup)](https://github.com/joanfabregat/mysql-s3-backup/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Python 3.13+](https://img.shields.io/badge/python-3.13+-blue.svg)](https://www.python.org/downloads/)
 
 A containerized solution for automated MySQL database backups to Amazon S3.
 
+**Version:** 2.0.0 | **Author:** [Joan Fabrégat](https://github.com/joanfabregat) | **License:** MIT
+
 ## Overview
 
-This service provides a reliable way to backup MySQL databases to Amazon S3 storage. It creates compressed database dumps and uploads them to a specified S3 bucket with configurable retention policies.
+This service provides a reliable way to backup MySQL databases to Amazon S3 storage. It creates compressed database dumps and uploads them to a specified S3 bucket. Retention policies can be configured using S3 lifecycle rules.
 
 ## Features
 
-- MySQL database dumping via `mysqldump`
+- MySQL database dumping via `mysqldump` (with `--no-tablespaces` flag)
 - Support for both TCP and Unix socket connections
 - Automatic compression of database dumps using gzip
-- Direct upload to Amazon S3 with configurable storage class
+- Direct upload to Amazon S3 (uses STANDARD_IA storage class)
 - Configurable S3 bucket path prefixing
 - Timestamp-based backup naming for easy sorting and identification
 - Automatic cleanup of local temporary files
-- Retry mechanism for S3 uploads
+- Retry mechanism for S3 uploads (3 attempts with 5s delay)
 - Comprehensive logging
 - Support for DATABASE_URL connection strings
+- Multi-architecture Docker images (amd64, arm64)
 
 ## Requirements
 
-- Docker
+- Docker (or Python 3.13+ for local execution)
 - AWS S3 bucket
 - AWS credentials with write access to the S3 bucket
 - MySQL/MariaDB database
@@ -61,6 +69,14 @@ AWS_SECRET_ACCESS_KEY=your-secret-key
 AWS_DEFAULT_REGION=us-west-1
 ```
 
+## Installation
+
+Pull the image from Docker Hub:
+
+```bash
+docker pull joanfabregat/mysql-s3-backup
+```
+
 ## Usage
 
 ### Docker Run
@@ -73,7 +89,7 @@ docker run \
   -e AWS_ACCESS_KEY_ID="AKIAXXXXXXXXXXXXXXXX" \
   -e AWS_SECRET_ACCESS_KEY="XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX" \
   -e AWS_DEFAULT_REGION="us-west-1" \
-  mysql-backup-service
+  joanfabregat/mysql-s3-backup
 ```
 
 ### Docker Compose
@@ -82,7 +98,7 @@ docker run \
 version: '3'
 services:
   mysql-backup:
-    image: mysql-backup-service
+    image: joanfabregat/mysql-s3-backup
     environment:
       - MYSQL_HOST=db
       - MYSQL_PORT=3306
@@ -119,7 +135,7 @@ spec:
         spec:
           containers:
           - name: mysql-backup
-            image: mysql-backup-service
+            image: joanfabregat/mysql-s3-backup
             env:
             - name: MYSQL_HOST
               value: "db-service"
@@ -166,7 +182,7 @@ Successful backups will be uploaded to your S3 bucket with filenames in the form
 ## Building the Image
 
 ```bash
-docker build -t mysql-backup-service .
+docker build -t joanfabregat/mysql-s3-backup .
 ```
 
 ## Security Considerations
