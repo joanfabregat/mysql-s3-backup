@@ -9,8 +9,6 @@
 
 A containerized solution for automated MySQL database backups to Amazon S3.
 
-**Version:** 2.0.0 | **Author:** [Joan Fabrégat](https://github.com/joanfabregat) | **License:** MIT
-
 ## Overview
 
 This service provides a reliable way to backup MySQL databases to Amazon S3 storage. It creates compressed database dumps and uploads them to a specified S3 bucket. Retention policies can be configured using S3 lifecycle rules.
