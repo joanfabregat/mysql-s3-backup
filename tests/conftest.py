@@ -1,25 +1,26 @@
 """Pytest configuration and shared fixtures."""
 
+from unittest.mock import MagicMock
+
 import pytest
-from unittest.mock import MagicMock, patch
 
 
 @pytest.fixture
 def mock_env_vars():
     """Fixture that provides common environment variable mocking."""
     env = {
-        'MYSQL_HOST': 'localhost',
-        'MYSQL_PORT': '3306',
-        'MYSQL_USER': 'testuser',
-        'MYSQL_PASSWORD': 'testpass',
-        'MYSQL_DATABASE': 'testdb',
-        'MYSQL_SOCKET': None,
-        'S3_BUCKET': 'test-bucket',
-        'S3_PREFIX': 'backups',
-        'AWS_ACCESS_KEY_ID': 'AKIAIOSFODNN7EXAMPLE',
-        'AWS_SECRET_ACCESS_KEY': 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY',
-        'AWS_DEFAULT_REGION': 'us-east-1',
-        'DATABASE_URL': None,
+        "MYSQL_HOST": "localhost",
+        "MYSQL_PORT": "3306",
+        "MYSQL_USER": "testuser",
+        "MYSQL_PASSWORD": "testpass",
+        "MYSQL_DATABASE": "testdb",
+        "MYSQL_SOCKET": None,
+        "S3_BUCKET": "test-bucket",
+        "S3_PREFIX": "backups",
+        "AWS_ACCESS_KEY_ID": "AKIAIOSFODNN7EXAMPLE",
+        "AWS_SECRET_ACCESS_KEY": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+        "AWS_DEFAULT_REGION": "us-east-1",
+        "DATABASE_URL": None,
     }
     return env
 

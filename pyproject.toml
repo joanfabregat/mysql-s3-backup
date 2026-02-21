@@ -24,6 +24,8 @@ packages = ["src/mysql_s3_backup"]
 [dependency-groups]
 dev = [
     "pytest>=8.0.0",
+    "ruff>=0.8.0",
+    "pip-audit>=2.7.0",
 ]
 
 [tool.pytest.ini_options]
@@ -31,3 +33,11 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
 addopts = "-v"
+
+[tool.ruff]
+target-version = "py313"
+line-length = 120
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]

@@ -1,15 +1,16 @@
 """Tests for main backup orchestration."""
 
-import pytest
-from unittest.mock import patch, MagicMock
-import sys
 import os
+import sys
+from unittest.mock import MagicMock, patch
+
+import pytest
 
 
 def clear_backup_module():
     """Remove backup module from cache to force re-import with new env vars."""
-    if 'mysql_s3_backup.backup' in sys.modules:
-        del sys.modules['mysql_s3_backup.backup']
+    if "mysql_s3_backup.backup" in sys.modules:
+        del sys.modules["mysql_s3_backup.backup"]
 
 
 class TestMainValidation:
@@ -22,16 +23,16 @@ class TestMainValidation:
     def test_main_raises_on_missing_database(self):
         """Test that main() raises ValueError when database is missing."""
         env = {
-            'MYSQL_HOST': 'localhost',
-            'MYSQL_PORT': '3306',
-            'MYSQL_USER': 'user',
-            'MYSQL_PASSWORD': 'pass',
+            "MYSQL_HOST": "localhost",
+            "MYSQL_PORT": "3306",
+            "MYSQL_USER": "user",
+            "MYSQL_PASSWORD": "pass",
         }
 
-        with patch.dict('os.environ', env, clear=False):
-            os.environ.pop('DATABASE_URL', None)
-            os.environ.pop('MYSQL_DATABASE', None)
-            os.environ.pop('MYSQL_SOCKET', None)
+        with patch.dict("os.environ", env, clear=False):
+            os.environ.pop("DATABASE_URL", None)
+            os.environ.pop("MYSQL_DATABASE", None)
+            os.environ.pop("MYSQL_SOCKET", None)
             clear_backup_module()
             from mysql_s3_backup.backup import main
 
@@ -41,16 +42,16 @@ class TestMainValidation:
     def test_main_raises_on_missing_user(self):
         """Test that main() raises ValueError when user is missing."""
         env = {
-            'MYSQL_HOST': 'localhost',
-            'MYSQL_PORT': '3306',
-            'MYSQL_PASSWORD': 'pass',
-            'MYSQL_DATABASE': 'mydb',
+            "MYSQL_HOST": "localhost",
+            "MYSQL_PORT": "3306",
+            "MYSQL_PASSWORD": "pass",
+            "MYSQL_DATABASE": "mydb",
         }
 
-        with patch.dict('os.environ', env, clear=False):
-            os.environ.pop('DATABASE_URL', None)
-            os.environ.pop('MYSQL_USER', None)
-            os.environ.pop('MYSQL_SOCKET', None)
+        with patch.dict("os.environ", env, clear=False):
+            os.environ.pop("DATABASE_URL", None)
+            os.environ.pop("MYSQL_USER", None)
+            os.environ.pop("MYSQL_SOCKET", None)
             clear_backup_module()
             from mysql_s3_backup.backup import main
 
@@ -60,16 +61,16 @@ class TestMainValidation:
     def test_main_raises_on_missing_host_and_socket(self):
         """Test that main() raises ValueError when both host and socket are missing."""
         env = {
-            'MYSQL_PORT': '3306',
-            'MYSQL_USER': 'user',
-            'MYSQL_PASSWORD': 'pass',
-            'MYSQL_DATABASE': 'mydb',
+            "MYSQL_PORT": "3306",
+            "MYSQL_USER": "user",
+            "MYSQL_PASSWORD": "pass",
+            "MYSQL_DATABASE": "mydb",
         }
 
-        with patch.dict('os.environ', env, clear=False):
-            os.environ.pop('DATABASE_URL', None)
-            os.environ.pop('MYSQL_HOST', None)
-            os.environ.pop('MYSQL_SOCKET', None)
+        with patch.dict("os.environ", env, clear=False):
+            os.environ.pop("DATABASE_URL", None)
+            os.environ.pop("MYSQL_HOST", None)
+            os.environ.pop("MYSQL_SOCKET", None)
             clear_backup_module()
             from mysql_s3_backup.backup import main
 
@@ -87,16 +88,16 @@ class TestMysqldumpCommand:
     def test_mysqldump_uses_tcp_connection(self):
         """Test that mysqldump uses TCP connection when host is provided."""
         env = {
-            'MYSQL_HOST': 'db.example.com',
-            'MYSQL_PORT': '3307',
-            'MYSQL_USER': 'user',
-            'MYSQL_PASSWORD': 'pass',
-            'MYSQL_DATABASE': 'mydb',
-            'S3_BUCKET': 'bucket',
-            'S3_PREFIX': 'prefix',
-            'AWS_ACCESS_KEY_ID': 'key',
-            'AWS_SECRET_ACCESS_KEY': 'secret',
-            'AWS_DEFAULT_REGION': 'us-east-1',
+            "MYSQL_HOST": "db.example.com",
+            "MYSQL_PORT": "3307",
+            "MYSQL_USER": "user",
+            "MYSQL_PASSWORD": "pass",
+            "MYSQL_DATABASE": "mydb",
+            "S3_BUCKET": "bucket",
+            "S3_PREFIX": "prefix",
+            "AWS_ACCESS_KEY_ID": "key",
+            "AWS_SECRET_ACCESS_KEY": "secret",
+            "AWS_DEFAULT_REGION": "us-east-1",
         }
 
         mock_mysqldump = MagicMock()
@@ -110,44 +111,45 @@ class TestMysqldumpCommand:
 
         def capture_popen(cmd, **kwargs):
             captured_cmd.append(cmd)
-            if cmd[0] == 'mysqldump':
+            if cmd[0] == "mysqldump":
                 return mock_mysqldump
             return mock_gzip
 
-        with patch.dict('os.environ', env, clear=False):
-            os.environ.pop('DATABASE_URL', None)
-            os.environ.pop('MYSQL_SOCKET', None)
+        with patch.dict("os.environ", env, clear=False):
+            os.environ.pop("DATABASE_URL", None)
+            os.environ.pop("MYSQL_SOCKET", None)
             clear_backup_module()
 
             # Patch before importing to ensure it's applied
-            with patch('subprocess.Popen', side_effect=capture_popen):
-                with patch('subprocess.check_output', return_value=b'1.0M\t/tmp/file'):
-                    with patch('os.remove'):
+            with patch("subprocess.Popen", side_effect=capture_popen):
+                with patch("subprocess.check_output", return_value=b"1.0M\t/tmp/file"):
+                    with patch("os.remove"):
                         # Now import and run
                         import mysql_s3_backup.backup as backup
-                        with patch.object(backup, 'upload_to_s3', return_value=True):
+
+                        with patch.object(backup, "upload_to_s3", return_value=True):
                             backup.main()
 
         mysqldump_cmd = captured_cmd[0]
-        assert '-h' in mysqldump_cmd
-        assert 'db.example.com' in mysqldump_cmd
-        assert '-P' in mysqldump_cmd
-        assert '3307' in mysqldump_cmd
+        assert "-h" in mysqldump_cmd
+        assert "db.example.com" in mysqldump_cmd
+        assert "-P" in mysqldump_cmd
+        assert "3307" in mysqldump_cmd
 
     def test_mysqldump_uses_socket_connection(self):
         """Test that mysqldump uses socket connection when socket is provided."""
         env = {
-            'MYSQL_HOST': 'localhost',
-            'MYSQL_PORT': '3306',
-            'MYSQL_USER': 'user',
-            'MYSQL_PASSWORD': 'pass',
-            'MYSQL_DATABASE': 'mydb',
-            'MYSQL_SOCKET': '/var/run/mysqld/mysqld.sock',
-            'S3_BUCKET': 'bucket',
-            'S3_PREFIX': 'prefix',
-            'AWS_ACCESS_KEY_ID': 'key',
-            'AWS_SECRET_ACCESS_KEY': 'secret',
-            'AWS_DEFAULT_REGION': 'us-east-1',
+            "MYSQL_HOST": "localhost",
+            "MYSQL_PORT": "3306",
+            "MYSQL_USER": "user",
+            "MYSQL_PASSWORD": "pass",
+            "MYSQL_DATABASE": "mydb",
+            "MYSQL_SOCKET": "/var/run/mysqld/mysqld.sock",
+            "S3_BUCKET": "bucket",
+            "S3_PREFIX": "prefix",
+            "AWS_ACCESS_KEY_ID": "key",
+            "AWS_SECRET_ACCESS_KEY": "secret",
+            "AWS_DEFAULT_REGION": "us-east-1",
         }
 
         mock_mysqldump = MagicMock()
@@ -161,40 +163,41 @@ class TestMysqldumpCommand:
 
         def capture_popen(cmd, **kwargs):
             captured_cmd.append(cmd)
-            if cmd[0] == 'mysqldump':
+            if cmd[0] == "mysqldump":
                 return mock_mysqldump
             return mock_gzip
 
-        with patch.dict('os.environ', env, clear=False):
-            os.environ.pop('DATABASE_URL', None)
+        with patch.dict("os.environ", env, clear=False):
+            os.environ.pop("DATABASE_URL", None)
             clear_backup_module()
 
-            with patch('subprocess.Popen', side_effect=capture_popen):
-                with patch('subprocess.check_output', return_value=b'1.0M\t/tmp/file'):
-                    with patch('os.remove'):
+            with patch("subprocess.Popen", side_effect=capture_popen):
+                with patch("subprocess.check_output", return_value=b"1.0M\t/tmp/file"):
+                    with patch("os.remove"):
                         import mysql_s3_backup.backup as backup
-                        with patch.object(backup, 'upload_to_s3', return_value=True):
+
+                        with patch.object(backup, "upload_to_s3", return_value=True):
                             backup.main()
 
         mysqldump_cmd = captured_cmd[0]
-        assert '--socket' in mysqldump_cmd
-        assert '/var/run/mysqld/mysqld.sock' in mysqldump_cmd
+        assert "--socket" in mysqldump_cmd
+        assert "/var/run/mysqld/mysqld.sock" in mysqldump_cmd
         # Should NOT have TCP flags when using socket
-        assert '-h' not in mysqldump_cmd
+        assert "-h" not in mysqldump_cmd
 
     def test_mysqldump_includes_no_tablespaces_flag(self):
         """Test that mysqldump always includes --no-tablespaces flag."""
         env = {
-            'MYSQL_HOST': 'localhost',
-            'MYSQL_PORT': '3306',
-            'MYSQL_USER': 'user',
-            'MYSQL_PASSWORD': 'pass',
-            'MYSQL_DATABASE': 'mydb',
-            'S3_BUCKET': 'bucket',
-            'S3_PREFIX': 'prefix',
-            'AWS_ACCESS_KEY_ID': 'key',
-            'AWS_SECRET_ACCESS_KEY': 'secret',
-            'AWS_DEFAULT_REGION': 'us-east-1',
+            "MYSQL_HOST": "localhost",
+            "MYSQL_PORT": "3306",
+            "MYSQL_USER": "user",
+            "MYSQL_PASSWORD": "pass",
+            "MYSQL_DATABASE": "mydb",
+            "S3_BUCKET": "bucket",
+            "S3_PREFIX": "prefix",
+            "AWS_ACCESS_KEY_ID": "key",
+            "AWS_SECRET_ACCESS_KEY": "secret",
+            "AWS_DEFAULT_REGION": "us-east-1",
         }
 
         mock_mysqldump = MagicMock()
@@ -208,24 +211,25 @@ class TestMysqldumpCommand:
 
         def capture_popen(cmd, **kwargs):
             captured_cmd.append(cmd)
-            if cmd[0] == 'mysqldump':
+            if cmd[0] == "mysqldump":
                 return mock_mysqldump
             return mock_gzip
 
-        with patch.dict('os.environ', env, clear=False):
-            os.environ.pop('DATABASE_URL', None)
-            os.environ.pop('MYSQL_SOCKET', None)
+        with patch.dict("os.environ", env, clear=False):
+            os.environ.pop("DATABASE_URL", None)
+            os.environ.pop("MYSQL_SOCKET", None)
             clear_backup_module()
 
-            with patch('subprocess.Popen', side_effect=capture_popen):
-                with patch('subprocess.check_output', return_value=b'1.0M\t/tmp/file'):
-                    with patch('os.remove'):
+            with patch("subprocess.Popen", side_effect=capture_popen):
+                with patch("subprocess.check_output", return_value=b"1.0M\t/tmp/file"):
+                    with patch("os.remove"):
                         import mysql_s3_backup.backup as backup
-                        with patch.object(backup, 'upload_to_s3', return_value=True):
+
+                        with patch.object(backup, "upload_to_s3", return_value=True):
                             backup.main()
 
         mysqldump_cmd = captured_cmd[0]
-        assert '--no-tablespaces' in mysqldump_cmd
+        assert "--no-tablespaces" in mysqldump_cmd
 
 
 class TestBackupWorkflow:
@@ -238,16 +242,16 @@ class TestBackupWorkflow:
     def test_successful_backup_removes_local_file(self):
         """Test that successful backup removes local dump file."""
         env = {
-            'MYSQL_HOST': 'localhost',
-            'MYSQL_PORT': '3306',
-            'MYSQL_USER': 'user',
-            'MYSQL_PASSWORD': 'pass',
-            'MYSQL_DATABASE': 'mydb',
-            'S3_BUCKET': 'bucket',
-            'S3_PREFIX': 'prefix',
-            'AWS_ACCESS_KEY_ID': 'key',
-            'AWS_SECRET_ACCESS_KEY': 'secret',
-            'AWS_DEFAULT_REGION': 'us-east-1',
+            "MYSQL_HOST": "localhost",
+            "MYSQL_PORT": "3306",
+            "MYSQL_USER": "user",
+            "MYSQL_PASSWORD": "pass",
+            "MYSQL_DATABASE": "mydb",
+            "S3_BUCKET": "bucket",
+            "S3_PREFIX": "prefix",
+            "AWS_ACCESS_KEY_ID": "key",
+            "AWS_SECRET_ACCESS_KEY": "secret",
+            "AWS_DEFAULT_REGION": "us-east-1",
         }
 
         mock_mysqldump = MagicMock()
@@ -258,41 +262,42 @@ class TestBackupWorkflow:
         mock_gzip.wait.return_value = 0
 
         def mock_popen(cmd, **kwargs):
-            if cmd[0] == 'mysqldump':
+            if cmd[0] == "mysqldump":
                 return mock_mysqldump
             return mock_gzip
 
-        with patch.dict('os.environ', env, clear=False):
-            os.environ.pop('DATABASE_URL', None)
-            os.environ.pop('MYSQL_SOCKET', None)
+        with patch.dict("os.environ", env, clear=False):
+            os.environ.pop("DATABASE_URL", None)
+            os.environ.pop("MYSQL_SOCKET", None)
             clear_backup_module()
 
-            with patch('subprocess.Popen', side_effect=mock_popen):
-                with patch('subprocess.check_output', return_value=b'1.0M\t/tmp/file'):
-                    with patch('os.remove') as mock_remove:
+            with patch("subprocess.Popen", side_effect=mock_popen):
+                with patch("subprocess.check_output", return_value=b"1.0M\t/tmp/file"):
+                    with patch("os.remove") as mock_remove:
                         import mysql_s3_backup.backup as backup
-                        with patch.object(backup, 'upload_to_s3', return_value=True):
+
+                        with patch.object(backup, "upload_to_s3", return_value=True):
                             backup.main()
 
         mock_remove.assert_called_once()
         # Verify it was called with a path ending in .sql.gz
         call_arg = mock_remove.call_args[0][0]
-        assert call_arg.endswith('.sql.gz')
-        assert call_arg.startswith('/tmp/')
+        assert call_arg.endswith(".sql.gz")
+        assert call_arg.startswith("/tmp/")
 
     def test_mysqldump_failure_exits_with_error(self):
         """Test that mysqldump failure causes exit with code 1."""
         env = {
-            'MYSQL_HOST': 'localhost',
-            'MYSQL_PORT': '3306',
-            'MYSQL_USER': 'user',
-            'MYSQL_PASSWORD': 'pass',
-            'MYSQL_DATABASE': 'mydb',
-            'S3_BUCKET': 'bucket',
-            'S3_PREFIX': 'prefix',
-            'AWS_ACCESS_KEY_ID': 'key',
-            'AWS_SECRET_ACCESS_KEY': 'secret',
-            'AWS_DEFAULT_REGION': 'us-east-1',
+            "MYSQL_HOST": "localhost",
+            "MYSQL_PORT": "3306",
+            "MYSQL_USER": "user",
+            "MYSQL_PASSWORD": "pass",
+            "MYSQL_DATABASE": "mydb",
+            "S3_BUCKET": "bucket",
+            "S3_PREFIX": "prefix",
+            "AWS_ACCESS_KEY_ID": "key",
+            "AWS_SECRET_ACCESS_KEY": "secret",
+            "AWS_DEFAULT_REGION": "us-east-1",
         }
 
         mock_mysqldump = MagicMock()
@@ -303,14 +308,14 @@ class TestBackupWorkflow:
         mock_gzip.wait.return_value = 0
 
         def mock_popen(cmd, **kwargs):
-            if cmd[0] == 'mysqldump':
+            if cmd[0] == "mysqldump":
                 return mock_mysqldump
             return mock_gzip
 
-        with patch.dict('os.environ', env, clear=False):
-            os.environ.pop('DATABASE_URL', None)
-            os.environ.pop('MYSQL_SOCKET', None)
-            with patch('subprocess.Popen', side_effect=mock_popen):
+        with patch.dict("os.environ", env, clear=False):
+            os.environ.pop("DATABASE_URL", None)
+            os.environ.pop("MYSQL_SOCKET", None)
+            with patch("subprocess.Popen", side_effect=mock_popen):
                 clear_backup_module()
                 from mysql_s3_backup.backup import main
 
@@ -322,16 +327,16 @@ class TestBackupWorkflow:
     def test_s3_upload_failure_exits_with_error(self):
         """Test that S3 upload failure causes exit with code 1."""
         env = {
-            'MYSQL_HOST': 'localhost',
-            'MYSQL_PORT': '3306',
-            'MYSQL_USER': 'user',
-            'MYSQL_PASSWORD': 'pass',
-            'MYSQL_DATABASE': 'mydb',
-            'S3_BUCKET': 'bucket',
-            'S3_PREFIX': 'prefix',
-            'AWS_ACCESS_KEY_ID': 'key',
-            'AWS_SECRET_ACCESS_KEY': 'secret',
-            'AWS_DEFAULT_REGION': 'us-east-1',
+            "MYSQL_HOST": "localhost",
+            "MYSQL_PORT": "3306",
+            "MYSQL_USER": "user",
+            "MYSQL_PASSWORD": "pass",
+            "MYSQL_DATABASE": "mydb",
+            "S3_BUCKET": "bucket",
+            "S3_PREFIX": "prefix",
+            "AWS_ACCESS_KEY_ID": "key",
+            "AWS_SECRET_ACCESS_KEY": "secret",
+            "AWS_DEFAULT_REGION": "us-east-1",
         }
 
         mock_mysqldump = MagicMock()
@@ -342,19 +347,20 @@ class TestBackupWorkflow:
         mock_gzip.wait.return_value = 0
 
         def mock_popen(cmd, **kwargs):
-            if cmd[0] == 'mysqldump':
+            if cmd[0] == "mysqldump":
                 return mock_mysqldump
             return mock_gzip
 
-        with patch.dict('os.environ', env, clear=False):
-            os.environ.pop('DATABASE_URL', None)
-            os.environ.pop('MYSQL_SOCKET', None)
+        with patch.dict("os.environ", env, clear=False):
+            os.environ.pop("DATABASE_URL", None)
+            os.environ.pop("MYSQL_SOCKET", None)
             clear_backup_module()
 
-            with patch('subprocess.Popen', side_effect=mock_popen):
-                with patch('subprocess.check_output', return_value=b'1.0M\t/tmp/file'):
+            with patch("subprocess.Popen", side_effect=mock_popen):
+                with patch("subprocess.check_output", return_value=b"1.0M\t/tmp/file"):
                     import mysql_s3_backup.backup as backup
-                    with patch.object(backup, 'upload_to_s3', return_value=False):
+
+                    with patch.object(backup, "upload_to_s3", return_value=False):
                         with pytest.raises(SystemExit) as exc_info:
                             backup.main()
 
@@ -371,16 +377,16 @@ class TestS3KeyGeneration:
     def test_s3_key_with_prefix(self):
         """Test that S3 key correctly includes prefix."""
         env = {
-            'MYSQL_HOST': 'localhost',
-            'MYSQL_PORT': '3306',
-            'MYSQL_USER': 'user',
-            'MYSQL_PASSWORD': 'pass',
-            'MYSQL_DATABASE': 'mydb',
-            'S3_BUCKET': 'bucket',
-            'S3_PREFIX': 'backups/daily',
-            'AWS_ACCESS_KEY_ID': 'key',
-            'AWS_SECRET_ACCESS_KEY': 'secret',
-            'AWS_DEFAULT_REGION': 'us-east-1',
+            "MYSQL_HOST": "localhost",
+            "MYSQL_PORT": "3306",
+            "MYSQL_USER": "user",
+            "MYSQL_PASSWORD": "pass",
+            "MYSQL_DATABASE": "mydb",
+            "S3_BUCKET": "bucket",
+            "S3_PREFIX": "backups/daily",
+            "AWS_ACCESS_KEY_ID": "key",
+            "AWS_SECRET_ACCESS_KEY": "secret",
+            "AWS_DEFAULT_REGION": "us-east-1",
         }
 
         mock_mysqldump = MagicMock()
@@ -393,7 +399,7 @@ class TestS3KeyGeneration:
         captured_s3_key = []
 
         def mock_popen(cmd, **kwargs):
-            if cmd[0] == 'mysqldump':
+            if cmd[0] == "mysqldump":
                 return mock_mysqldump
             return mock_gzip
 
@@ -401,35 +407,36 @@ class TestS3KeyGeneration:
             captured_s3_key.append(key)
             return True
 
-        with patch.dict('os.environ', env, clear=False):
-            os.environ.pop('DATABASE_URL', None)
-            os.environ.pop('MYSQL_SOCKET', None)
+        with patch.dict("os.environ", env, clear=False):
+            os.environ.pop("DATABASE_URL", None)
+            os.environ.pop("MYSQL_SOCKET", None)
             clear_backup_module()
 
-            with patch('subprocess.Popen', side_effect=mock_popen):
-                with patch('subprocess.check_output', return_value=b'1.0M\t/tmp/file'):
-                    with patch('os.remove'):
+            with patch("subprocess.Popen", side_effect=mock_popen):
+                with patch("subprocess.check_output", return_value=b"1.0M\t/tmp/file"):
+                    with patch("os.remove"):
                         import mysql_s3_backup.backup as backup
-                        with patch.object(backup, 'upload_to_s3', side_effect=mock_upload):
+
+                        with patch.object(backup, "upload_to_s3", side_effect=mock_upload):
                             backup.main()
 
         assert len(captured_s3_key) == 1
-        assert captured_s3_key[0].startswith('backups/daily/')
-        assert captured_s3_key[0].endswith('.sql.gz')
+        assert captured_s3_key[0].startswith("backups/daily/")
+        assert captured_s3_key[0].endswith(".sql.gz")
 
     def test_s3_key_with_leading_slash_prefix(self):
         """Test that leading slashes in prefix are handled correctly."""
         env = {
-            'MYSQL_HOST': 'localhost',
-            'MYSQL_PORT': '3306',
-            'MYSQL_USER': 'user',
-            'MYSQL_PASSWORD': 'pass',
-            'MYSQL_DATABASE': 'mydb',
-            'S3_BUCKET': 'bucket',
-            'S3_PREFIX': '/backups/',
-            'AWS_ACCESS_KEY_ID': 'key',
-            'AWS_SECRET_ACCESS_KEY': 'secret',
-            'AWS_DEFAULT_REGION': 'us-east-1',
+            "MYSQL_HOST": "localhost",
+            "MYSQL_PORT": "3306",
+            "MYSQL_USER": "user",
+            "MYSQL_PASSWORD": "pass",
+            "MYSQL_DATABASE": "mydb",
+            "S3_BUCKET": "bucket",
+            "S3_PREFIX": "/backups/",
+            "AWS_ACCESS_KEY_ID": "key",
+            "AWS_SECRET_ACCESS_KEY": "secret",
+            "AWS_DEFAULT_REGION": "us-east-1",
         }
 
         mock_mysqldump = MagicMock()
@@ -442,7 +449,7 @@ class TestS3KeyGeneration:
         captured_s3_key = []
 
         def mock_popen(cmd, **kwargs):
-            if cmd[0] == 'mysqldump':
+            if cmd[0] == "mysqldump":
                 return mock_mysqldump
             return mock_gzip
 
@@ -450,18 +457,19 @@ class TestS3KeyGeneration:
             captured_s3_key.append(key)
             return True
 
-        with patch.dict('os.environ', env, clear=False):
-            os.environ.pop('DATABASE_URL', None)
-            os.environ.pop('MYSQL_SOCKET', None)
+        with patch.dict("os.environ", env, clear=False):
+            os.environ.pop("DATABASE_URL", None)
+            os.environ.pop("MYSQL_SOCKET", None)
             clear_backup_module()
 
-            with patch('subprocess.Popen', side_effect=mock_popen):
-                with patch('subprocess.check_output', return_value=b'1.0M\t/tmp/file'):
-                    with patch('os.remove'):
+            with patch("subprocess.Popen", side_effect=mock_popen):
+                with patch("subprocess.check_output", return_value=b"1.0M\t/tmp/file"):
+                    with patch("os.remove"):
                         import mysql_s3_backup.backup as backup
-                        with patch.object(backup, 'upload_to_s3', side_effect=mock_upload):
+
+                        with patch.object(backup, "upload_to_s3", side_effect=mock_upload):
                             backup.main()
 
         # Key should not start with /
-        assert not captured_s3_key[0].startswith('/')
-        assert captured_s3_key[0].startswith('backups/')
+        assert not captured_s3_key[0].startswith("/")
+        assert captured_s3_key[0].startswith("backups/")
