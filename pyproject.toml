@@ -5,7 +5,7 @@ description = "A simple tool to backup MySQL databases to S3"
 authors = [
     { name = "Joan Fabrégat", email = "j@fabreg.at" }
 ]
-requires-python = ">=3.13"
+requires-python = ">=3.14"
 dependencies = [
     "boto3>=1.37.13",
     "tenacity>=9.0.0",
@@ -35,7 +35,7 @@ python_functions = ["test_*"]
 addopts = "-v"
 
 [tool.ruff]
-target-version = "py313"
+target-version = "py314"
 line-length = 120
 src = ["src", "tests"]
 

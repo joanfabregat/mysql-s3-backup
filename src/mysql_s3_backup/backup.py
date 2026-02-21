@@ -34,7 +34,8 @@ def load_config() -> tuple:
     """
     Load MySQL connection parameters from environment variables
 
-    :return: Tuple of connection parameters (host, port, user, password, database, socket)
+    :return: Tuple of connection parameters (host, port, user, password, databases, socket)
+             where databases is a list[str]
     """
     if DATABASE_URL:
         try:
@@ -43,13 +44,14 @@ def load_config() -> tuple:
                 logger.error("Error: URL must use mysql:// scheme")
                 sys.exit(1)
             query_params = urllib.parse.parse_qs(parsed.query)
+            databases = [db.strip() for db in parsed.path.lstrip("/").split(",") if db.strip()]
 
             return (
                 parsed.hostname,  # Hostname
                 (parsed.port or "3306"),  # Port
                 parsed.username,  # Username
                 parsed.password,  # Password
-                parsed.path.lstrip("/"),  # Database
+                databases,  # Databases
                 query_params["unix_socket"][0] if "unix_socket" in query_params else None,  # Unix socket
             )
 
@@ -57,7 +59,8 @@ def load_config() -> tuple:
             logger.exception(f"Error parsing DATABASE_URL: {str(e)}")
             sys.exit(1)
     else:
-        return MYSQL_HOST, MYSQL_PORT, MYSQL_USER, MYSQL_PASSWORD, MYSQL_DATABASE, MYSQL_SOCKET
+        databases = [db.strip() for db in MYSQL_DATABASE.split(",") if db.strip()] if MYSQL_DATABASE else []
+        return MYSQL_HOST, MYSQL_PORT, MYSQL_USER, MYSQL_PASSWORD, databases, MYSQL_SOCKET
 
 
 @tenacity.retry(wait=tenacity.wait_fixed(5), stop=tenacity.stop_after_attempt(3))
@@ -84,76 +87,82 @@ def upload_to_s3(local_file: str, bucket: str, key: str) -> bool:
 def main() -> None:
     # Generate timestamp in the same format as bash script
     timestamp = datetime.now(UTC).strftime("%Y-%m-%dT%H%M%SZ")
-    destination = f"/tmp/{timestamp}.sql.gz"
 
     # Read MySQL connection parameters
-    host, port, user, password, database, socket = load_config()
+    host, port, user, password, databases, socket = load_config()
 
     # Validate required parameters
-    if not database:
+    if not databases:
         raise ValueError("Error: Missing required environment variable MYSQL_DATABASE")
     if not user:
         raise ValueError("Error: Missing required environment variable MYSQL_USER")
     if not host and not socket:
         raise ValueError("Error: Missing required environment variable MYSQL_HOST or MYSQL_SOCKET")
 
-    # Build mysqldump command based on connection type
-    logger.info(f"Dumping MySQL database: {database}")
-    mysqldump_cmd = ["mysqldump", "-u", user, "--no-tablespaces"]
+    # Build base mysqldump command (without database name)
+    base_cmd = ["mysqldump", "-u", user, "--no-tablespaces"]
 
     if socket:
-        # Use socket connection
         logger.debug(f"Using socket connection: {socket}")
-        mysqldump_cmd.extend(["--socket", socket])
+        base_cmd.extend(["--socket", socket])
     else:
-        # Use TCP connection
         logger.debug(f"Using TCP connection: {host}:{port}")
-        mysqldump_cmd.extend(["-h", host, "-P", str(port)])
+        base_cmd.extend(["-h", host, "-P", str(port)])
 
     if password:
         logger.debug("Using password for authentication")
-        mysqldump_cmd.append(f"--password={password}")
+        base_cmd.append(f"--password={password}")
 
-    mysqldump_cmd.append(database)
+    multi = len(databases) > 1
 
-    # Open gzip process for piping
-    try:
-        with open(destination, "wb") as f:
-            logger.debug("Starting mysqldump process")
-            mysqldump_process = subprocess.Popen(mysqldump_cmd, stdout=subprocess.PIPE)
-            gzip_process = subprocess.Popen(["gzip", "-c"], stdin=mysqldump_process.stdout, stdout=f)
+    for database in databases:
+        destination = f"/tmp/{database}_{timestamp}.sql.gz"
+        mysqldump_cmd = base_cmd + [database]
 
-            # Close mysqldump's stdout to allow it to receive a SIGPIPE if gzip exits
-            mysqldump_process.stdout.close()
+        logger.info(f"Dumping MySQL database: {database}")
 
-            # Wait for processes to complete
-            gzip_process.wait()
-            mysqldump_exit_code = mysqldump_process.wait()
+        # Open gzip process for piping
+        try:
+            with open(destination, "wb") as f:
+                logger.debug("Starting mysqldump process")
+                mysqldump_process = subprocess.Popen(mysqldump_cmd, stdout=subprocess.PIPE)
+                gzip_process = subprocess.Popen(["gzip", "-c"], stdin=mysqldump_process.stdout, stdout=f)
 
-            if mysqldump_exit_code != 0:
-                logger.error("Error: Database dump failed.")
+                # Close mysqldump's stdout to allow it to receive a SIGPIPE if gzip exits
+                mysqldump_process.stdout.close()
+
+                # Wait for processes to complete
+                gzip_process.wait()
+                mysqldump_exit_code = mysqldump_process.wait()
+
+                if mysqldump_exit_code != 0:
+                    logger.error("Error: Database dump failed.")
+                    sys.exit(1)
+
+            # Get file size for reporting
+            file_size = subprocess.check_output(["du", "-sh", destination]).decode().split()[0]
+            logger.debug(f"Dumped MySQL database (size: {file_size})")
+
+            # Upload to S3
+            prefix = S3_PREFIX.lstrip("/")
+            if multi:
+                s3_key = f"{prefix}/{database}/{timestamp}.sql.gz".lstrip("/")
+            else:
+                s3_key = f"{prefix}/{timestamp}.sql.gz".lstrip("/")
+            logger.info(f"Uploading dump to S3: {s3_key}")
+            if upload_to_s3(destination, S3_BUCKET, s3_key):
+                logger.info("Uploaded successfully.")
+            else:
+                logger.error("Error: S3 upload failed.")
                 sys.exit(1)
 
-        # Get file size for reporting
-        file_size = subprocess.check_output(["du", "-sh", destination]).decode().split()[0]
-        logger.debug(f"Dumped MySQL database (size: {file_size})")
+            # Remove dump
+            logger.debug("Removing local dump")
+            os.remove(destination)
 
-        # Upload to S3
-        s3_key = f"{S3_PREFIX.lstrip('/')}/{timestamp}.sql.gz".lstrip("/")
-        logger.info(f"Uploading dump to S3: {s3_key}")
-        if upload_to_s3(destination, S3_BUCKET, s3_key):
-            logger.info("Uploaded successfully.")
-        else:
-            logger.error("Error: S3 upload failed.")
+        except Exception as e:
+            logger.exception(f"Error: {str(e)}")
             sys.exit(1)
-
-        # Remove dump
-        logger.debug("Removing local dump")
-        os.remove(destination)
-
-    except Exception as e:
-        logger.exception(f"Error: {str(e)}")
-        sys.exit(1)
 
 
 if __name__ == "__main__":

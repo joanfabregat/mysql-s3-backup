@@ -1,11 +1,12 @@
 # MySQL Backup Service
 
+[![CI](https://github.com/joanfabregat/mysql-s3-backup/actions/workflows/ci.yml/badge.svg)](https://github.com/joanfabregat/mysql-s3-backup/actions/workflows/ci.yml)
 [![Build and push Docker image](https://github.com/joanfabregat/mysql-s3-backup/actions/workflows/docker-image.yml/badge.svg)](https://github.com/joanfabregat/mysql-s3-backup/actions/workflows/docker-image.yml)
 [![Docker Pulls](https://img.shields.io/docker/pulls/joanfabregat/mysql-s3-backup)](https://hub.docker.com/r/joanfabregat/mysql-s3-backup)
 [![Docker Image Size](https://img.shields.io/docker/image-size/joanfabregat/mysql-s3-backup/latest)](https://hub.docker.com/r/joanfabregat/mysql-s3-backup)
 [![GitHub release](https://img.shields.io/github/v/release/joanfabregat/mysql-s3-backup)](https://github.com/joanfabregat/mysql-s3-backup/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python 3.13+](https://img.shields.io/badge/python-3.13+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.14+](https://img.shields.io/badge/python-3.14+-blue.svg)](https://www.python.org/downloads/)
 
 A containerized solution for automated MySQL database backups to Amazon S3.
 
@@ -25,11 +26,12 @@ This service provides a reliable way to backup MySQL databases to Amazon S3 stor
 - Retry mechanism for S3 uploads (3 attempts with 5s delay)
 - Comprehensive logging
 - Support for DATABASE_URL connection strings
+- Multi-database backup via comma-separated `MYSQL_DATABASE`
 - Multi-architecture Docker images (amd64, arm64)
 
 ## Requirements
 
-- Docker (or Python 3.13+ for local execution)
+- Docker (or Python 3.14+ for local execution)
 - AWS S3 bucket
 - AWS credentials with write access to the S3 bucket
 - MySQL/MariaDB database
@@ -53,7 +55,7 @@ MYSQL_HOST=hostname
 MYSQL_PORT=3306 (optional, defaults to 3306)
 MYSQL_USER=username
 MYSQL_PASSWORD=password
-MYSQL_DATABASE=database
+MYSQL_DATABASE=database (supports comma-separated list, e.g. db1,db2)
 MYSQL_SOCKET=/path/to/socket (optional, for Unix socket connections)
 ```
 
@@ -93,7 +95,6 @@ docker run \
 ### Docker Compose
 
 ```yaml
-version: '3'
 services:
   mysql-backup:
     image: joanfabregat/mysql-s3-backup
@@ -103,6 +104,24 @@ services:
       - MYSQL_USER=backup_user
       - MYSQL_PASSWORD=backup_password
       - MYSQL_DATABASE=my_database
+      - S3_BUCKET=my-backup-bucket
+      - S3_PREFIX=backups/mysql
+      - AWS_ACCESS_KEY_ID=AKIAXXXXXXXXXXXXXXXX
+      - AWS_SECRET_ACCESS_KEY=XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+      - AWS_DEFAULT_REGION=us-west-1
+```
+
+To back up multiple databases in a single run:
+
+```yaml
+services:
+  mysql-backup:
+    image: joanfabregat/mysql-s3-backup
+    environment:
+      - MYSQL_HOST=db
+      - MYSQL_USER=backup_user
+      - MYSQL_PASSWORD=backup_password
+      - MYSQL_DATABASE=app_db,analytics_db
       - S3_BUCKET=my-backup-bucket
       - S3_PREFIX=backups/mysql
       - AWS_ACCESS_KEY_ID=AKIAXXXXXXXXXXXXXXXX
@@ -175,6 +194,30 @@ The service provides detailed logs of the backup process. All logs are output to
 Successful backups will be uploaded to your S3 bucket with filenames in the format:
 ```
 [S3_PREFIX]/YYYY-MM-DDTHHMMSSz.sql.gz
+```
+
+When backing up multiple databases (comma-separated `MYSQL_DATABASE`), each dump is uploaded under a database-specific subdirectory:
+```
+[S3_PREFIX]/[DATABASE]/YYYY-MM-DDTHHMMSSz.sql.gz
+```
+
+## Development
+
+Requires [uv](https://docs.astral.sh/uv/) for dependency management.
+
+```bash
+# Install dependencies
+uv sync --group dev
+
+# Run tests
+uv run pytest
+
+# Lint and format check
+uv run ruff check .
+uv run ruff format --check .
+
+# Dependency audit
+uv run pip-audit
 ```
 
 ## Building the Image

@@ -37,7 +37,7 @@ class TestLoadConfigFromEnvVars:
 
             result = load_config()
 
-        assert result == ("db.example.com", "3307", "admin", "secret123", "production", None)
+        assert result == ("db.example.com", "3307", "admin", "secret123", ["production"], None)
 
     def test_load_config_with_default_port(self):
         """Test that port defaults to 3306 when not specified."""
@@ -81,6 +81,69 @@ class TestLoadConfigFromEnvVars:
 
         assert result[5] == "/var/run/mysqld/mysqld.sock"
 
+    def test_load_config_returns_list_of_databases(self):
+        """Test that a single database is returned as a list."""
+        env = {
+            "MYSQL_HOST": "localhost",
+            "MYSQL_PORT": "3306",
+            "MYSQL_USER": "user",
+            "MYSQL_PASSWORD": "pass",
+            "MYSQL_DATABASE": "production",
+        }
+        keys_to_remove = ["DATABASE_URL", "MYSQL_SOCKET"]
+
+        with patch.dict("os.environ", env, clear=False):
+            for key in keys_to_remove:
+                os.environ.pop(key, None)
+            clear_backup_module()
+            from mysql_s3_backup.backup import load_config
+
+            result = load_config()
+
+        assert result[4] == ["production"]
+
+    def test_load_config_comma_separated_databases(self):
+        """Test that comma-separated databases are returned as a list."""
+        env = {
+            "MYSQL_HOST": "localhost",
+            "MYSQL_PORT": "3306",
+            "MYSQL_USER": "user",
+            "MYSQL_PASSWORD": "pass",
+            "MYSQL_DATABASE": "db1,db2",
+        }
+        keys_to_remove = ["DATABASE_URL", "MYSQL_SOCKET"]
+
+        with patch.dict("os.environ", env, clear=False):
+            for key in keys_to_remove:
+                os.environ.pop(key, None)
+            clear_backup_module()
+            from mysql_s3_backup.backup import load_config
+
+            result = load_config()
+
+        assert result[4] == ["db1", "db2"]
+
+    def test_load_config_comma_separated_with_whitespace(self):
+        """Test that whitespace around database names is stripped."""
+        env = {
+            "MYSQL_HOST": "localhost",
+            "MYSQL_PORT": "3306",
+            "MYSQL_USER": "user",
+            "MYSQL_PASSWORD": "pass",
+            "MYSQL_DATABASE": "db1, db2 , db3",
+        }
+        keys_to_remove = ["DATABASE_URL", "MYSQL_SOCKET"]
+
+        with patch.dict("os.environ", env, clear=False):
+            for key in keys_to_remove:
+                os.environ.pop(key, None)
+            clear_backup_module()
+            from mysql_s3_backup.backup import load_config
+
+            result = load_config()
+
+        assert result[4] == ["db1", "db2", "db3"]
+
 
 class TestLoadConfigFromDatabaseUrl:
     """Test load_config() with DATABASE_URL."""
@@ -97,7 +160,7 @@ class TestLoadConfigFromDatabaseUrl:
 
             result = load_config()
 
-        assert result == ("myhost", 3307, "myuser", "mypass", "mydb", None)
+        assert result == ("myhost", 3307, "myuser", "mypass", ["mydb"], None)
 
     def test_load_config_database_url_default_port(self):
         """Test DATABASE_URL without explicit port uses default."""
