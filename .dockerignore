@@ -2,13 +2,7 @@
 .github
 .claude
 .idea
-.pytest_cache
-.ruff_cache
-.venv
-__pycache__
-*.pyc
 .DS_Store
-tests
 CLAUDE.md
 README.md
 LICENSE

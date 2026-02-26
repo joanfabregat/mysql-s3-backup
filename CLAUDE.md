@@ -2,27 +2,18 @@
 
 ## Before Committing
 
-Always run the full check suite before creating a commit:
+Always run shellcheck before creating a commit:
 
 ```bash
-uv run pytest
-uv run ruff check .
-uv run ruff format --check .
+shellcheck backup.sh
 ```
 
-All tests must pass and there must be no lint or formatting errors before committing changes.
-
-If formatting issues are found, fix them with:
-
-```bash
-uv run ruff format .
-```
+There must be no shellcheck warnings or errors before committing changes.
 
 ## On Code Changes
 
-When modifying source code (`src/`) or tests (`tests/`), run the tests and linter to verify the changes:
+When modifying `backup.sh`, run shellcheck to verify:
 
 ```bash
-uv run pytest
-uv run ruff check .
+shellcheck backup.sh
 ```

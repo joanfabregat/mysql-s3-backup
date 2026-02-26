@@ -6,7 +6,6 @@
 [![Docker Image Size](https://img.shields.io/docker/image-size/joanfabregat/mysql-s3-backup/latest)](https://hub.docker.com/r/joanfabregat/mysql-s3-backup)
 [![GitHub release](https://img.shields.io/github/v/release/joanfabregat/mysql-s3-backup)](https://github.com/joanfabregat/mysql-s3-backup/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python 3.14+](https://img.shields.io/badge/python-3.14+-blue.svg)](https://www.python.org/downloads/)
 
 A containerized solution for automated MySQL database backups to Amazon S3 and S3-compatible storage providers (Backblaze B2, MinIO, etc.).
 
@@ -19,20 +18,19 @@ This service provides a reliable way to backup MySQL databases to Amazon S3 or a
 - MySQL database dumping via `mysqldump` (with `--no-tablespaces` flag)
 - Support for both TCP and Unix socket connections
 - Automatic compression of database dumps using gzip
-- Direct upload to Amazon S3 or any S3-compatible provider (Backblaze B2, MinIO, etc.)
+- Upload to Amazon S3 or any S3-compatible provider (Backblaze B2, MinIO, etc.) via `aws` CLI
 - Configurable storage class (defaults to STANDARD_IA, can be disabled for non-AWS providers)
 - Configurable S3 bucket path prefixing
 - Timestamp-based backup naming for easy sorting and identification
 - Automatic cleanup of local temporary files
 - Retry mechanism for S3 uploads (3 attempts with 5s delay)
-- Comprehensive logging
 - Support for DATABASE_URL connection strings
 - Multi-database backup via comma-separated `MYSQL_DATABASE`
 - Multi-architecture Docker images (amd64, arm64)
 
 ## Requirements
 
-- Docker (or Python 3.14+ for local execution)
+- Docker
 - S3-compatible storage bucket (AWS S3, Backblaze B2, MinIO, etc.)
 - Credentials with write access to the bucket
 - MySQL/MariaDB database
@@ -212,7 +210,7 @@ spec:
 
 ## Output and Logging
 
-The service provides detailed logs of the backup process. All logs are output to stdout/stderr for container logging systems to capture.
+The service provides logs of the backup process. All output goes to stdout/stderr for container logging systems to capture.
 
 Successful backups will be uploaded to your S3 bucket with filenames in the format:
 ```
@@ -226,21 +224,9 @@ When backing up multiple databases (comma-separated `MYSQL_DATABASE`), each dump
 
 ## Development
 
-Requires [uv](https://docs.astral.sh/uv/) for dependency management.
-
 ```bash
-# Install dependencies
-uv sync --group dev
-
-# Run tests
-uv run pytest
-
-# Lint and format check
-uv run ruff check .
-uv run ruff format --check .
-
-# Dependency audit
-uv run pip-audit
+# Lint the shell script
+shellcheck backup.sh
 ```
 
 ## Building the Image
