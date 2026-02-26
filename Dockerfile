@@ -31,4 +31,6 @@ ENV PYTHONPATH="/app/src"
 
 COPY src/ src/
 
+USER nobody
+
 CMD ["python", "-m", "mysql_s3_backup"]

@@ -89,8 +89,8 @@ docker run \
   -e DATABASE_URL="mysql://user:password@hostname:3306/database" \
   -e S3_BUCKET="my-backup-bucket" \
   -e S3_PREFIX="mysql/daily" \
-  -e AWS_ACCESS_KEY_ID="AKIAXXXXXXXXXXXXXXXX" \
-  -e AWS_SECRET_ACCESS_KEY="XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX" \
+  -e AWS_ACCESS_KEY_ID="your-access-key" \
+  -e AWS_SECRET_ACCESS_KEY="your-secret-key" \
   -e AWS_DEFAULT_REGION="us-west-1" \
   joanfabregat/mysql-s3-backup
 ```
@@ -109,8 +109,8 @@ services:
       - MYSQL_DATABASE=my_database
       - S3_BUCKET=my-backup-bucket
       - S3_PREFIX=backups/mysql
-      - AWS_ACCESS_KEY_ID=AKIAXXXXXXXXXXXXXXXX
-      - AWS_SECRET_ACCESS_KEY=XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+      - AWS_ACCESS_KEY_ID=your-access-key
+      - AWS_SECRET_ACCESS_KEY=your-secret-key
       - AWS_DEFAULT_REGION=us-west-1
 ```
 
@@ -127,8 +127,8 @@ services:
       - MYSQL_DATABASE=app_db,analytics_db
       - S3_BUCKET=my-backup-bucket
       - S3_PREFIX=backups/mysql
-      - AWS_ACCESS_KEY_ID=AKIAXXXXXXXXXXXXXXXX
-      - AWS_SECRET_ACCESS_KEY=XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+      - AWS_ACCESS_KEY_ID=your-access-key
+      - AWS_SECRET_ACCESS_KEY=your-secret-key
       - AWS_DEFAULT_REGION=us-west-1
 ```
 
