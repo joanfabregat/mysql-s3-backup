@@ -20,6 +20,8 @@ MYSQL_DATABASE = os.environ.get("MYSQL_DATABASE")
 MYSQL_SOCKET = os.environ.get("MYSQL_SOCKET") or None
 S3_BUCKET = os.environ.get("S3_BUCKET")
 S3_PREFIX = os.environ.get("S3_PREFIX") or "/"
+S3_ENDPOINT_URL = os.environ.get("S3_ENDPOINT_URL") or None
+S3_STORAGE_CLASS = os.environ.get("S3_STORAGE_CLASS", "STANDARD_IA")
 AWS_ACCESS_KEY_ID = os.environ.get("AWS_ACCESS_KEY_ID")
 AWS_SECRET_ACCESS_KEY = os.environ.get("AWS_SECRET_ACCESS_KEY")
 AWS_DEFAULT_REGION = os.environ.get("AWS_DEFAULT_REGION")
@@ -67,16 +69,21 @@ def load_config() -> tuple:
 def upload_to_s3(local_file: str, bucket: str, key: str) -> bool:
     """Upload a file to S3 using boto3 library directly"""
     try:
-        # Create an S3 client
-        s3_client = boto3.client(
-            "s3",
-            aws_access_key_id=AWS_ACCESS_KEY_ID,
-            aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
-            region_name=AWS_DEFAULT_REGION,
-        )
+        # Create an S3 client (supports S3-compatible providers via endpoint URL)
+        client_kwargs = {
+            "aws_access_key_id": AWS_ACCESS_KEY_ID,
+            "aws_secret_access_key": AWS_SECRET_ACCESS_KEY,
+            "region_name": AWS_DEFAULT_REGION,
+        }
+        if S3_ENDPOINT_URL:
+            client_kwargs["endpoint_url"] = S3_ENDPOINT_URL
+        s3_client = boto3.client("s3", **client_kwargs)
 
         # Upload the file directly using boto3
-        s3_client.upload_file(local_file, bucket, key, ExtraArgs={"StorageClass": "STANDARD_IA"})
+        extra_args = {}
+        if S3_STORAGE_CLASS:
+            extra_args["StorageClass"] = S3_STORAGE_CLASS
+        s3_client.upload_file(local_file, bucket, key, ExtraArgs=extra_args)
 
         return True
     except Exception as e:

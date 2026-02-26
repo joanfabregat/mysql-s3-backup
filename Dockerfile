@@ -19,14 +19,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends default-mysql-c
 
 ARG MYSQL_PORT=3306
 ARG S3_PREFIX=/
+ARG S3_STORAGE_CLASS=STANDARD_IA
 
 ENV MYSQL_PORT=$MYSQL_PORT
 ENV S3_PREFIX=$S3_PREFIX
+ENV S3_STORAGE_CLASS=$S3_STORAGE_CLASS
 
 COPY --from=builder /app/.venv .venv
 ENV PATH="/app/.venv/bin:$PATH"
 ENV PYTHONPATH="/app/src"
 
 COPY src/ src/
+
+USER nobody
 
 CMD ["python", "-m", "mysql_s3_backup"]
