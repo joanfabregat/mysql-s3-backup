@@ -33,7 +33,7 @@ jobs:
           images: joanfabregat/mysql-s3-backup
           tags: |
             type=ref,event=tag
-            type=semver,pattern=v{{major}}.{{minor}}
+            type=semver,pattern=v{{major}}.{{minor}},enable=${{ !contains(github.ref, '-') }}
             type=raw,value=latest,enable=${{ !contains(github.ref, '-') }}
 
       - name: Build and push Docker image
