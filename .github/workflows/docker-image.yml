@@ -32,9 +32,9 @@ jobs:
         with:
           images: joanfabregat/mysql-s3-backup
           tags: |
-            type=semver,pattern=v{{version}}
+            type=ref,event=tag
             type=semver,pattern=v{{major}}.{{minor}}
-            type=raw,value=latest
+            type=raw,value=latest,enable=${{ !contains(github.ref, '-') }}
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
