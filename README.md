@@ -8,18 +8,19 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.14+](https://img.shields.io/badge/python-3.14+-blue.svg)](https://www.python.org/downloads/)
 
-A containerized solution for automated MySQL database backups to Amazon S3.
+A containerized solution for automated MySQL database backups to Amazon S3 and S3-compatible storage providers (Backblaze B2, MinIO, etc.).
 
 ## Overview
 
-This service provides a reliable way to backup MySQL databases to Amazon S3 storage. It creates compressed database dumps and uploads them to a specified S3 bucket. Retention policies can be configured using S3 lifecycle rules.
+This service provides a reliable way to backup MySQL databases to Amazon S3 or any S3-compatible storage provider (Backblaze B2, MinIO, etc.). It creates compressed database dumps and uploads them to a specified bucket. Retention policies can be configured using bucket lifecycle rules.
 
 ## Features
 
 - MySQL database dumping via `mysqldump` (with `--no-tablespaces` flag)
 - Support for both TCP and Unix socket connections
 - Automatic compression of database dumps using gzip
-- Direct upload to Amazon S3 (uses STANDARD_IA storage class)
+- Direct upload to Amazon S3 or any S3-compatible provider (Backblaze B2, MinIO, etc.)
+- Configurable storage class (defaults to STANDARD_IA, can be disabled for non-AWS providers)
 - Configurable S3 bucket path prefixing
 - Timestamp-based backup naming for easy sorting and identification
 - Automatic cleanup of local temporary files
@@ -32,8 +33,8 @@ This service provides a reliable way to backup MySQL databases to Amazon S3 stor
 ## Requirements
 
 - Docker (or Python 3.14+ for local execution)
-- AWS S3 bucket
-- AWS credentials with write access to the S3 bucket
+- S3-compatible storage bucket (AWS S3, Backblaze B2, MinIO, etc.)
+- Credentials with write access to the bucket
 - MySQL/MariaDB database
 
 ## Configuration
@@ -59,11 +60,13 @@ MYSQL_DATABASE=database (supports comma-separated list, e.g. db1,db2)
 MYSQL_SOCKET=/path/to/socket (optional, for Unix socket connections)
 ```
 
-### AWS Configuration
+### S3 / Storage Configuration
 
 ```
 S3_BUCKET=your-bucket-name
 S3_PREFIX=backups/mysql (optional, defaults to root)
+S3_ENDPOINT_URL=https://s3.us-west-004.backblazeb2.com (optional, for S3-compatible providers)
+S3_STORAGE_CLASS=STANDARD_IA (optional, defaults to STANDARD_IA; set to empty string to disable)
 AWS_ACCESS_KEY_ID=your-access-key
 AWS_SECRET_ACCESS_KEY=your-secret-key
 AWS_DEFAULT_REGION=us-west-1
@@ -127,6 +130,26 @@ services:
       - AWS_ACCESS_KEY_ID=AKIAXXXXXXXXXXXXXXXX
       - AWS_SECRET_ACCESS_KEY=XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
       - AWS_DEFAULT_REGION=us-west-1
+```
+
+### Backblaze B2
+
+```yaml
+services:
+  mysql-backup:
+    image: joanfabregat/mysql-s3-backup
+    environment:
+      - MYSQL_HOST=db
+      - MYSQL_USER=backup_user
+      - MYSQL_PASSWORD=backup_password
+      - MYSQL_DATABASE=my_database
+      - S3_BUCKET=my-b2-bucket
+      - S3_PREFIX=backups/mysql
+      - S3_ENDPOINT_URL=https://s3.us-west-004.backblazeb2.com
+      - S3_STORAGE_CLASS=
+      - AWS_ACCESS_KEY_ID=your-b2-application-key-id
+      - AWS_SECRET_ACCESS_KEY=your-b2-application-key
+      - AWS_DEFAULT_REGION=us-west-004
 ```
 
 ## Scheduled Backups
