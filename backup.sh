@@ -91,14 +91,16 @@ if [[ -n "${MYSQL_PASSWORD:-}" ]]; then
     mysqldump_args+=("--password=${MYSQL_PASSWORD}")
 fi
 
-# --- Build base aws s3 cp arguments ---
+# --- Build s5cmd arguments ---
 
-aws_args=()
+s5cmd_global_args=()
 if [[ -n "${S3_ENDPOINT_URL:-}" ]]; then
-    aws_args+=(--endpoint-url "$S3_ENDPOINT_URL")
+    s5cmd_global_args+=(--endpoint-url "$S3_ENDPOINT_URL")
 fi
+
+s5cmd_cp_args=()
 if [[ -n "$S3_STORAGE_CLASS" ]]; then
-    aws_args+=(--storage-class "$S3_STORAGE_CLASS")
+    s5cmd_cp_args+=(--storage-class "$S3_STORAGE_CLASS")
 fi
 
 # --- Timestamp ---
@@ -134,7 +136,7 @@ for db in "${databases[@]}"; do
     # Retry upload up to 3 times
     attempt=0
     max_attempts=3
-    until aws s3 cp "$dump_file" "$s3_uri" "${aws_args[@]}"; do
+    until s5cmd "${s5cmd_global_args[@]}" cp "${s5cmd_cp_args[@]}" "$dump_file" "$s3_uri"; do
         attempt=$((attempt + 1))
         if (( attempt >= max_attempts )); then
             echo "Error: S3 upload failed after $max_attempts attempts" >&2

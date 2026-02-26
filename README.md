@@ -18,7 +18,7 @@ This service provides a reliable way to backup MySQL databases to Amazon S3 or a
 - MySQL database dumping via `mysqldump` (with `--no-tablespaces` flag)
 - Support for both TCP and Unix socket connections
 - Automatic compression of database dumps using gzip
-- Upload to Amazon S3 or any S3-compatible provider (Backblaze B2, MinIO, etc.) via `aws` CLI
+- Upload to Amazon S3 or any S3-compatible provider (Backblaze B2, MinIO, etc.) via [`s5cmd`](https://github.com/peak/s5cmd)
 - Configurable storage class (defaults to STANDARD_IA, can be disabled for non-AWS providers)
 - Configurable S3 bucket path prefixing
 - Timestamp-based backup naming for easy sorting and identification
