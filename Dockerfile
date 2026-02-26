@@ -8,13 +8,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
     && curl -sL "https://github.com/peak/s5cmd/releases/download/v${S5CMD_VERSION}/s5cmd_${S5CMD_VERSION}_Linux-${ARCH}.tar.gz" \
        | tar -xz -C /usr/local/bin s5cmd
 
-FROM debian:trixie-slim
+FROM alpine:3.21
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        default-mysql-client \
-        gzip \
-    && rm -rf /var/lib/apt/lists/*
+RUN apk add --no-cache \
+    bash \
+    mariadb-client \
+    gzip
 
 COPY --from=s5cmd-builder /usr/local/bin/s5cmd /usr/local/bin/s5cmd
 
