@@ -1,4 +1,8 @@
-# Claude Code Instructions
+# mysql-s3-backup
+
+## Code Execution
+
+Never run code locally. Use the `/run-python` skill for all execution (tests, scripts).
 
 ## Before Committing
 
@@ -9,11 +13,3 @@ shellcheck backup.sh
 ```
 
 There must be no shellcheck warnings or errors before committing changes.
-
-## On Code Changes
-
-When modifying `backup.sh`, run shellcheck to verify:
-
-```bash
-shellcheck backup.sh
-```
