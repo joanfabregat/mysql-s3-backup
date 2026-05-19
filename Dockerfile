@@ -8,7 +8,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
     && curl -sL "https://github.com/peak/s5cmd/releases/download/v${S5CMD_VERSION}/s5cmd_${S5CMD_VERSION}_Linux-${ARCH}.tar.gz" \
        | tar -xz -C /usr/local/bin s5cmd
 
-FROM alpine:3.21
+FROM alpine:3.23
 WORKDIR /app
 
 RUN apk add --no-cache \
