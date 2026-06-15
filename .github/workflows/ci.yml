@@ -32,6 +32,38 @@ jobs:
           severity: CRITICAL,HIGH
           exit-code: 1
 
+  trivy-image:
+    name: Trivy image scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Build the actual image (amd64) and load it locally so Trivy can scan the
+      # built layers. The filesystem scan above only sees repo files; it cannot
+      # catch CVEs in the Alpine base packages or in the s5cmd Go binary — which
+      # is exactly where the findings in issue #7 lived.
+      - name: Build image for scanning
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: mysql-s3-backup:scan
+
+      # ignore-unfixed: only fail on CVEs that have an upstream fix available
+      # (the actionable set). Without it, an unfixable upstream CVE would block
+      # every build until the dependency cuts a release.
+      - name: Run Trivy image scan
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: image
+          image-ref: mysql-s3-backup:scan
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: 1
+
   semgrep:
     name: Semgrep SAST
     runs-on: ubuntu-latest
