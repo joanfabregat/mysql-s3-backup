@@ -16,8 +16,25 @@ S3_STORAGE_CLASS="${S3_STORAGE_CLASS-STANDARD_IA}"
 #
 # mysqldump can block indefinitely on a metadata lock; s5cmd can stall on a
 # network read. Both are wrapped.
-DUMP_TIMEOUT="${DUMP_TIMEOUT:-1800}"
-UPLOAD_TIMEOUT="${UPLOAD_TIMEOUT:-900}"
+#
+# THESE MUST FIT INSIDE THE JOB'S activeDeadlineSeconds, or the outer net always
+# fires first and these never get to say which step stalled -- which defeats the
+# point of having them. The worst case is:
+#
+#   per database = DUMP_TIMEOUT + (max_attempts x UPLOAD_TIMEOUT)
+#   total        = that x number of databases in MYSQL_DATABASE
+#
+# At the defaults below with 3 upload attempts that is 600 + 900 = 1500s per
+# database, so two databases fit in 3000s -- inside the 3600s
+# activeDeadlineSeconds both current deployments use. The first version of this
+# shipped 1800/900, which came to 4500s for one database and 9000s for two, so
+# the Job deadline always won and these never fired.
+#
+# For scale: the largest current deployment dumps and uploads a ~924 MiB gzipped
+# database in about 2m05s, so 600/300 is roughly 5x observed. Raise them for a
+# genuinely larger database -- and raise activeDeadlineSeconds to match.
+DUMP_TIMEOUT="${DUMP_TIMEOUT:-600}"
+UPLOAD_TIMEOUT="${UPLOAD_TIMEOUT:-300}"
 # Seconds to wait after TERM before sending KILL.
 TIMEOUT_GRACE="${TIMEOUT_GRACE:-30}"
 
