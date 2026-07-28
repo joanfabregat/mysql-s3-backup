@@ -7,6 +7,20 @@ MYSQL_PORT="${MYSQL_PORT:-3306}"
 S3_PREFIX="${S3_PREFIX:-/}"
 S3_STORAGE_CLASS="${S3_STORAGE_CLASS-STANDARD_IA}"
 
+# Wall-clock ceilings. Without these a stalled dump or upload hangs forever,
+# and on Kubernetes a CronJob with `concurrencyPolicy: Forbid` then skips every
+# subsequent run while looking idle -- that is how one deployment of this image
+# silently stopped backing up for 50 days. A Job-level activeDeadlineSeconds is
+# the outer net; these are the inner one, and they give a precise error instead
+# of an opaque kill.
+#
+# mysqldump can block indefinitely on a metadata lock; s5cmd can stall on a
+# network read. Both are wrapped.
+DUMP_TIMEOUT="${DUMP_TIMEOUT:-1800}"
+UPLOAD_TIMEOUT="${UPLOAD_TIMEOUT:-900}"
+# Seconds to wait after TERM before sending KILL.
+TIMEOUT_GRACE="${TIMEOUT_GRACE:-30}"
+
 # --- Parse DATABASE_URL if set ---
 
 if [[ -n "${DATABASE_URL:-}" ]]; then
@@ -119,7 +133,31 @@ for db in "${databases[@]}"; do
     dump_file="/tmp/${db}_${timestamp}.sql.gz"
     echo "Dumping MySQL database: $db"
 
-    mysqldump "${mysqldump_args[@]}" "$db" | gzip -c > "$dump_file"
+    # NOTE: the dump is buffered to /tmp rather than streamed to S3 (s5cmd has
+    # a `pipe` subcommand that would allow streaming). That is deliberate: it
+    # means only a COMPLETE dump is ever uploaded. Streaming would fuse dump and
+    # upload, so a mysqldump that died halfway could leave a truncated object
+    # that looks complete -- which matters a great deal when the target bucket
+    # is under Object Lock and the bad object cannot be deleted.
+    #
+    # The cost is disk: /tmp is ephemeral storage on Kubernetes and its limit is
+    # enforced by eviction. Size it above the largest single dump, not the sum,
+    # since each is removed after upload.
+    if ! timeout -k "$TIMEOUT_GRACE" "$DUMP_TIMEOUT" \
+            mysqldump "${mysqldump_args[@]}" "$db" | gzip -c > "$dump_file"; then
+        status=$?
+        # 124 is GNU coreutils' "timed out". BusyBox timeout (what Alpine ships,
+        # and what this image runs) instead exits 128+signal -- 143 for the TERM
+        # it sends at the deadline, 137 if the -k KILL was needed. Verified on
+        # busybox 1.37.0 / alpine 3.23: `timeout -k 5 2 sleep 60` returns 143.
+        if (( status == 124 || status == 137 || status == 143 )); then
+            echo "Error: dump of '$db' exceeded ${DUMP_TIMEOUT}s and was killed" >&2
+        else
+            echo "Error: dump of '$db' failed (exit ${status})" >&2
+        fi
+        rm -f "$dump_file"
+        exit 1
+    fi
 
     # Build S3 key
     prefix="${S3_PREFIX#/}"
@@ -136,7 +174,8 @@ for db in "${databases[@]}"; do
     # Retry upload up to 3 times
     attempt=0
     max_attempts=3
-    until s5cmd "${s5cmd_global_args[@]}" cp "${s5cmd_cp_args[@]}" "$dump_file" "$s3_uri"; do
+    until timeout -k "$TIMEOUT_GRACE" "$UPLOAD_TIMEOUT" \
+            s5cmd "${s5cmd_global_args[@]}" cp "${s5cmd_cp_args[@]}" "$dump_file" "$s3_uri"; do
         attempt=$((attempt + 1))
         if (( attempt >= max_attempts )); then
             echo "Error: S3 upload failed after $max_attempts attempts" >&2
