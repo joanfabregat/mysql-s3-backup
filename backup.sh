@@ -30,6 +30,9 @@ S3_STORAGE_CLASS="${S3_STORAGE_CLASS-STANDARD_IA}"
 # shipped 1800/900, which came to 4500s for one database and 9000s for two, so
 # the Job deadline always won and these never fired.
 #
+# With MYSQL_SINGLE_TRANSACTION enabled, add ENGINE_CHECK_TIMEOUT (30s) per
+# database to that worst case: 1530s each, 3060s for two.
+#
 # For scale: the largest current deployment dumps and uploads a ~924 MiB gzipped
 # database in about 2m05s, so 600/300 is roughly 5x observed. Raise them for a
 # genuinely larger database -- and raise activeDeadlineSeconds to match.
@@ -37,6 +40,44 @@ DUMP_TIMEOUT="${DUMP_TIMEOUT:-600}"
 UPLOAD_TIMEOUT="${UPLOAD_TIMEOUT:-300}"
 # Seconds to wait after TERM before sending KILL.
 TIMEOUT_GRACE="${TIMEOUT_GRACE:-30}"
+
+# Deliberately not tunable: the engine check is a metadata lookup against
+# information_schema, not a data read. If it has not answered in 30s the server
+# is in no state to be dumped, and DUMP_TIMEOUT will say so a moment later.
+ENGINE_CHECK_TIMEOUT=30
+
+# --single-transaction removes the write stall the default causes. Without it
+# mysqldump falls back to --lock-tables (part of --opt), which holds
+# LOCK TABLES ... READ LOCAL over every table in a database for the whole of that
+# database's dump -- minutes of blocked writes on a large schema. It also drops
+# LOCK TABLES from the grants the backup user needs.
+#
+# It is OFF by default and must stay that way. --single-transaction is only a
+# consistent snapshot of TRANSACTIONAL tables; MyISAM, Aria and MEMORY tables are
+# dumped outside the transaction and a concurrent write can tear them -- silently,
+# with nothing in the dump to show it. Enabling it for everyone would trade a
+# visible cost (a write stall) for an invisible one (an occasionally invalid
+# restore) on nothing more than an image pull, which is the wrong direction for a
+# backup tool.
+#
+# Neither mode gives a snapshot ACROSS databases: the loop below runs one
+# mysqldump per entry in MYSQL_DATABASE, so each gets its own lock or transaction
+# window and they do not line up.
+#
+# Turn it on for all-InnoDB deployments -- there it is a straight win. On mixed
+# ones the real fix is converting the stragglers (InnoDB has had FULLTEXT since
+# 5.6, which is the usual reason a MyISAM table is still around); the check in
+# warn_non_transactional_tables names them so an operator learns from the log
+# rather than from a failed restore.
+single_transaction="${MYSQL_SINGLE_TRANSACTION:-0}"
+case "${single_transaction,,}" in
+    1|true|yes|on)  single_transaction=1 ;;
+    0|false|no|off) single_transaction=0 ;;
+    *)
+        echo "Error: MYSQL_SINGLE_TRANSACTION must be a boolean (1/0, true/false, yes/no, on/off), got '${single_transaction}'" >&2
+        exit 1
+        ;;
+esac
 
 # --- Parse DATABASE_URL if set ---
 
@@ -108,19 +149,83 @@ if [[ -z "${S3_BUCKET:-}" ]]; then
     exit 1
 fi
 
-# --- Build base mysqldump arguments ---
+# --- Build connection arguments ---
 
-mysqldump_args=(-u "$MYSQL_USER" --no-tablespaces)
+# Shared by mysqldump and by the engine check below, so the check always talks to
+# the same server, as the same user, as the dump it is warning about.
+mysql_conn_args=(-u "$MYSQL_USER")
 
 if [[ -n "${MYSQL_SOCKET:-}" ]]; then
-    mysqldump_args+=(--socket "$MYSQL_SOCKET")
+    mysql_conn_args+=(--socket "$MYSQL_SOCKET")
 else
-    mysqldump_args+=(-h "$MYSQL_HOST" -P "$MYSQL_PORT")
+    mysql_conn_args+=(-h "$MYSQL_HOST" -P "$MYSQL_PORT")
 fi
 
 if [[ -n "${MYSQL_PASSWORD:-}" ]]; then
-    mysqldump_args+=("--password=${MYSQL_PASSWORD}")
+    mysql_conn_args+=("--password=${MYSQL_PASSWORD}")
 fi
+
+# --- Build base mysqldump arguments ---
+
+mysqldump_args=("${mysql_conn_args[@]}" --no-tablespaces)
+
+if (( single_transaction )); then
+    # --single-transaction turns --lock-tables off by itself, so there is nothing
+    # else to unset here.
+    mysqldump_args+=(--single-transaction)
+fi
+
+# --- Non-transactional table check ---
+
+# Names the tables in $1 that --single-transaction cannot snapshot consistently.
+#
+# Advisory only: every failure path here warns and returns. A backup must not be
+# abandoned because a diagnostic query could not run -- that would turn a missing
+# warning into a missing backup, which is strictly worse than the risk it warns
+# about.
+warn_non_transactional_tables() {
+    local db="$1"
+    local candidate client="" tables table
+
+    # Alpine's mariadb-client installs the client as `mariadb` and has so far also
+    # shipped a `mysql` compatibility symlink. Resolve whichever exists instead of
+    # betting on that symlink outliving a package update.
+    for candidate in mariadb mysql; do
+        if command -v "$candidate" >/dev/null 2>&1; then
+            client="$candidate"
+            break
+        fi
+    done
+
+    if [[ -z "$client" ]]; then
+        echo "Warning: no MySQL client found, skipping the non-transactional table check for '$db'" >&2
+        return
+    fi
+
+    # The database name is passed as an argument and read back with DATABASE()
+    # rather than interpolated into the SQL, so a name containing a quote cannot
+    # break out of the statement.
+    if ! tables=$(timeout -k "$TIMEOUT_GRACE" "$ENGINE_CHECK_TIMEOUT" \
+            "$client" "${mysql_conn_args[@]}" --batch --skip-column-names "$db" -e "
+                SELECT CONCAT(TABLE_NAME, ' (', IFNULL(ENGINE, 'unknown engine'), ')')
+                FROM information_schema.TABLES
+                WHERE TABLE_SCHEMA = DATABASE()
+                  AND TABLE_TYPE = 'BASE TABLE'
+                  AND (ENGINE IS NULL OR ENGINE <> 'InnoDB')
+                ORDER BY TABLE_NAME"); then
+        echo "Warning: could not check '$db' for non-transactional tables, continuing" >&2
+        return
+    fi
+
+    [[ -z "$tables" ]] && return
+
+    echo "Warning: MYSQL_SINGLE_TRANSACTION is enabled but '$db' has non-transactional tables:" >&2
+    while IFS= read -r table; do
+        echo "Warning:   $table" >&2
+    done <<< "$tables"
+    echo "Warning: these are dumped outside the transaction and a concurrent write can tear them." >&2
+    echo "Warning: convert them to InnoDB, or unset MYSQL_SINGLE_TRANSACTION to lock instead." >&2
+}
 
 # --- Build s5cmd arguments ---
 
@@ -149,6 +254,10 @@ for db in "${databases[@]}"; do
 
     dump_file="/tmp/${db}_${timestamp}.sql.gz"
     echo "Dumping MySQL database: $db"
+
+    if (( single_transaction )); then
+        warn_non_transactional_tables "$db"
+    fi
 
     # NOTE: the dump is buffered to /tmp rather than streamed to S3 (s5cmd has
     # a `pipe` subcommand that would allow streaming). That is deliberate: it

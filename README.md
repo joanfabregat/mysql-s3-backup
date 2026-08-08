@@ -16,6 +16,7 @@ This service provides a reliable way to backup MySQL databases to Amazon S3 or a
 ## Features
 
 - MySQL database dumping via `mysqldump` (with `--no-tablespaces` flag)
+- Optional `--single-transaction` dumps, so backups don't block writes (see [Dump consistency and locking](#dump-consistency-and-locking))
 - Support for both TCP and Unix socket connections
 - Automatic compression of database dumps using gzip
 - Upload to Amazon S3 or any S3-compatible provider (Backblaze B2, MinIO, etc.) via [`s5cmd`](https://github.com/peak/s5cmd)
@@ -56,6 +57,7 @@ MYSQL_USER=username
 MYSQL_PASSWORD=password
 MYSQL_DATABASE=database (supports comma-separated list, e.g. db1,db2)
 MYSQL_SOCKET=/path/to/socket (optional, for Unix socket connections)
+MYSQL_SINGLE_TRANSACTION=0 (optional, defaults to 0; see Dump consistency and locking)
 ```
 
 ### S3 / Storage Configuration
@@ -69,6 +71,63 @@ AWS_ACCESS_KEY_ID=your-access-key
 AWS_SECRET_ACCESS_KEY=your-secret-key
 AWS_DEFAULT_REGION=us-west-1
 ```
+
+## Dump consistency and locking
+
+By default `mysqldump` runs with `--lock-tables` (part of `--opt`): it takes
+`LOCK TABLES … READ LOCAL` over every table in a database and holds it for that
+database's entire dump. **Writes to those tables block for as long as the dump
+takes** — minutes on a large schema. In exchange, every table in the dump comes
+from the same point in time, whatever storage engine it uses.
+
+Setting `MYSQL_SINGLE_TRANSACTION=1` adds `--single-transaction`, which reads
+inside a transaction instead of locking. Writes are never blocked, and the backup
+user no longer needs `LOCK TABLES`.
+
+The catch: **`--single-transaction` is only a consistent snapshot of
+transactional tables.** InnoDB tables are safe. MyISAM, Aria and MEMORY tables
+are read outside the transaction, so a write landing mid-dump can tear them —
+silently, with nothing in the dump to indicate it. That is why this is opt-in and
+off by default: a backup tool should not quietly downgrade what "a valid backup"
+means on an image pull.
+
+Accepted values are `1`/`0`, `true`/`false`, `yes`/`no`, `on`/`off`. Anything
+else is rejected at startup rather than being silently treated as off.
+
+### Which one to use
+
+| | `MYSQL_SINGLE_TRANSACTION=0` (default) | `MYSQL_SINGLE_TRANSACTION=1` |
+|---|---|---|
+| Writes during the dump | Blocked | Not blocked |
+| InnoDB consistency | Yes | Yes |
+| MyISAM / Aria / MEMORY consistency | Yes | **No — can be torn** |
+| Grants needed | `SELECT, SHOW VIEW, TRIGGER, LOCK TABLES` | `SELECT, SHOW VIEW, TRIGGER` |
+
+**All-InnoDB deployment:** enable it. There is no downside.
+
+**Mixed engines:** the right fix is usually converting the remaining tables to
+InnoDB — InnoDB has supported `FULLTEXT` since MySQL 5.6, which is the common
+reason a MyISAM table is still around. Until then, leaving this off trades a
+known cost (the write stall) for a known guarantee.
+
+When enabled, the script queries `information_schema` before each dump and logs
+any non-InnoDB table it finds, so a mixed schema shows up in the backup log
+rather than in a failed restore:
+
+```
+Dumping MySQL database: mixeddb
+Warning: MYSQL_SINGLE_TRANSACTION is enabled but 'mixeddb' has non-transactional tables:
+Warning:   doc_recherche_index (MyISAM)
+Warning: these are dumped outside the transaction and a concurrent write can tear them.
+Warning: convert them to InnoDB, or unset MYSQL_SINGLE_TRANSACTION to lock instead.
+```
+
+The check is advisory: if it cannot run, it warns and the backup proceeds.
+
+Note that **neither mode gives a consistent snapshot across databases.** With a
+comma-separated `MYSQL_DATABASE`, each database is dumped by its own `mysqldump`
+invocation, so each gets its own lock or transaction window and they do not line
+up with each other.
 
 ## Installation
 
@@ -238,7 +297,7 @@ docker build -t joanfabregat/mysql-s3-backup .
 ## Security Considerations
 
 - Use IAM roles when running in AWS environments instead of hardcoded credentials
-- Create a dedicated database user with minimal permissions (SELECT, LOCK TABLES)
+- Create a dedicated database user with minimal permissions: `SELECT, SHOW VIEW, TRIGGER, LOCK TABLES`, or `SELECT, SHOW VIEW, TRIGGER` with `MYSQL_SINGLE_TRANSACTION=1` (see [Dump consistency and locking](#dump-consistency-and-locking))
 - Store sensitive environment variables using appropriate secret management solutions
 - Consider encrypting your S3 bucket to protect sensitive data
 
@@ -250,6 +309,10 @@ Common issues:
 2. **Permission denied**: Ensure the MySQL user has proper permissions for dumping
 3. **S3 upload failures**: Check AWS credentials and bucket write permissions
 4. **Out of space errors**: Ensure enough temporary storage is available
+5. **Writes stall while the backup runs**: This is `mysqldump`'s default table
+   locking. See [Dump consistency and locking](#dump-consistency-and-locking)
+6. **`Access denied … when using LOCK TABLES`**: Either grant `LOCK TABLES` to the
+   backup user, or set `MYSQL_SINGLE_TRANSACTION=1`, which does not need it
 
 ## License
 
