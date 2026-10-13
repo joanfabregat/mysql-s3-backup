@@ -1,0 +1,24 @@
+[package]
+name = "mysql-s3-backup"
+version = "4.0.0-beta.1"
+edition = "2024"
+rust-version = "1.94.1"
+description = "Stream mysqldump backups to Amazon S3 and S3-compatible storage"
+license = "MIT"
+repository = "https://github.com/joanfabregat/mysql-s3-backup"
+publish = false
+
+[dependencies]
+anyhow = "1"
+aws-config = { version = "1.12", default-features = false, features = ["behavior-version-latest", "credentials-process", "default-https-client", "rt-tokio", "sso"] }
+aws-sdk-s3 = { version = "1.152", default-features = false, features = ["behavior-version-latest", "default-https-client", "http-1x", "rt-tokio", "sigv4a"] }
+aws-smithy-types = "1"
+flate2 = "1"
+libc = "0.2"
+md-5 = "0.10"
+tokio = { version = "1", features = ["io-util", "macros", "process", "rt-multi-thread", "signal", "sync", "time"] }
+
+[profile.release]
+codegen-units = 1
+lto = true
+strip = true
