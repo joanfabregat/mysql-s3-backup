@@ -1,9 +1,9 @@
 # Build s5cmd from source with a current Go toolchain so the binary embeds an
 # up-to-date Go stdlib. The upstream prebuilt release tarballs are compiled with
 # an old Go (v2.3.0 ships Go 1.22.10), which Trivy flags for stdlib CVEs.
-# The patch version is pinned so a cached or stale 1.26 tag cannot silently
-# rebuild with a vulnerable toolchain; bump it when Go ships stdlib fixes.
-FROM golang:1.26.9-alpine AS s5cmd-builder
+# The minor-version tag is deliberate: every rebuild picks up the latest Go
+# patch release, so a stdlib fix only needs a new image, not a Dockerfile edit.
+FROM golang:1.26-alpine AS s5cmd-builder
 
 ARG S5CMD_VERSION=2.3.0
 ENV CGO_ENABLED=0
