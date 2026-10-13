@@ -1,32 +1,29 @@
-# Build s5cmd from source with a current Go toolchain so the binary embeds an
-# up-to-date Go stdlib. The upstream prebuilt release tarballs are compiled with
-# an old Go (v2.3.0 ships Go 1.22.10), which Trivy flags for stdlib CVEs.
-# The minor-version tag is deliberate: every rebuild picks up the latest Go
-# patch release, so a stdlib fix only needs a new image, not a Dockerfile edit.
-FROM golang:1.26-alpine AS s5cmd-builder
+# The rust:1 tag is deliberate: every rebuild picks up the latest stable
+# toolchain, so a fix only needs a new image, not a Dockerfile edit.
+FROM rust:1-alpine3.23 AS builder
 
-ARG S5CMD_VERSION=2.3.0
-ENV CGO_ENABLED=0
+# cmake and perl are aws-lc-sys's fallback build path, used when its bundled
+# build script does not cover the target.
+RUN apk add --no-cache build-base cmake perl
 
-# Print the embedded build metadata so the build log records the toolchain.
-RUN go install \
-    -ldflags "-X=github.com/peak/s5cmd/v2/version.Version=v${S5CMD_VERSION}" \
-    "github.com/peak/s5cmd/v2@v${S5CMD_VERSION}" \
-    && go version -m /go/bin/s5cmd
+# cargo-auditable embeds the dependency list in the binary, so Trivy can
+# report advisories in the Rust crates inside the image, not only in Alpine.
+RUN cargo install cargo-auditable --locked --version 0.7.7
+
+WORKDIR /src
+COPY Cargo.toml Cargo.lock ./
+COPY src ./src
+RUN cargo auditable build --release --locked
 
 FROM alpine:3.23
-WORKDIR /app
 
+# mariadb-client provides mariadb-dump (mysqldump) and the mariadb client the
+# MYSQL_SINGLE_TRANSACTION engine check uses.
 RUN apk upgrade --no-cache \
-    && apk add --no-cache \
-    bash \
-    mariadb-client \
-    gzip
+    && apk add --no-cache mariadb-client
 
-COPY --from=s5cmd-builder /go/bin/s5cmd /usr/local/bin/s5cmd
-
-COPY backup.sh .
+COPY --from=builder /src/target/release/mysql-s3-backup /usr/local/bin/mysql-s3-backup
 
 USER nobody
 
-ENTRYPOINT ["/app/backup.sh"]
+ENTRYPOINT ["/usr/local/bin/mysql-s3-backup"]

@@ -3,23 +3,116 @@ name: CI
 on:
   pull_request:
     branches: [main]
+  push:
+    branches: [main]
   workflow_dispatch:
 
+env:
+  CARGO_TERM_COLOR: always
+
 jobs:
-  shellcheck:
-    name: ShellCheck
+  lint:
+    name: Format, Clippy and unit tests
     runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Run ShellCheck
-        uses: ludeeus/action-shellcheck@00cae500b08a931fb5698e11e79bfbd38e612a38 # 2.0.0
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
         with:
-          scandir: .
-          severity: warning
+          toolchain: stable
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      - name: Check formatting
+        run: cargo fmt --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets --locked -- -D warnings
+
+      - name: Unit tests
+        run: cargo test --bins --locked
+
+  audit:
+    name: Cargo audit
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
+        with:
+          tool: cargo-audit
+
+      - name: Audit Cargo.lock
+        run: cargo audit --deny warnings
+
+  # Every integration test against a real server and a real S3-compatible
+  # store: a backup restored into a fresh database and compared by checksum,
+  # multi-database keys, the engine warning, and the failure paths (mysqldump
+  # failing mid-stream, a stall hitting DUMP_TIMEOUT, SIGTERM, an S3 error),
+  # each asserting that no object and no multipart upload is left behind.
+  integration:
+    name: Integration (${{ matrix.db }})
+    runs-on: ubuntu-26.04
+    strategy:
+      fail-fast: false
+      matrix:
+        db: ["mysql:8.4", "mariadb:11.4", "mariadb:11.8"]
+    services:
+      db:
+        image: ${{ matrix.db }}
+        env:
+          MYSQL_ROOT_PASSWORD: rootpw
+        ports: ["3306:3306"]
+      s3:
+        image: versity/versitygw:v1.8.0
+        env:
+          ROOT_ACCESS_KEY: testkey
+          ROOT_SECRET_KEY: testsecret123
+          VGW_BACKEND: posix
+          VGW_BACKEND_ARG: /tmp/vgw
+        ports: ["7070:7070"]
+    env:
+      TEST_REQUIRE_INTEGRATION: "1"
+      TEST_S3_ENDPOINT: http://127.0.0.1:7070
+      TEST_MYSQL_HOST: 127.0.0.1
+      TEST_MYSQL_PORT: "3306"
+      TEST_MYSQL_USER: root
+      TEST_MYSQL_PASSWORD: rootpw
+      AWS_ACCESS_KEY_ID: testkey
+      AWS_SECRET_ACCESS_KEY: testsecret123
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install the MariaDB client
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends mariadb-client
+
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+        with:
+          toolchain: stable
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      - name: Build
+        run: cargo test --test integration --locked --no-run
+
+      - name: Wait for the database and S3
+        run: |
+          for _ in $(seq 1 60); do
+            if MYSQL_PWD=rootpw mariadb -h 127.0.0.1 -u root -e 'SELECT 1' >/dev/null 2>&1 \
+                && curl -s -o /dev/null http://127.0.0.1:7070; then
+              exit 0
+            fi
+            sleep 2
+          done
+          MYSQL_PWD=rootpw mariadb -h 127.0.0.1 -u root -e 'SELECT 1'
+          exit 1
+
+      - name: Integration tests
+        run: cargo test --test integration --locked -- --test-threads=4
 
   trivy:
-    name: Trivy security scan
+    name: Trivy filesystem scan
     runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -32,20 +125,43 @@ jobs:
           severity: CRITICAL,HIGH
           exit-code: 1
 
-  trivy-image:
-    name: Trivy image scan
+  # Builds the real image, scans it, then runs the database integration tests
+  # through it, so the shipped binary, its mariadb-client and its user are what
+  # get tested.
+  image:
+    name: Image scan and end-to-end tests
     runs-on: ubuntu-26.04
+    services:
+      db:
+        image: mariadb:11.8
+        env:
+          MYSQL_ROOT_PASSWORD: rootpw
+        ports: ["3306:3306"]
+      s3:
+        image: versity/versitygw:v1.8.0
+        env:
+          ROOT_ACCESS_KEY: testkey
+          ROOT_SECRET_KEY: testsecret123
+          VGW_BACKEND: posix
+          VGW_BACKEND_ARG: /tmp/vgw
+        ports: ["7070:7070"]
+    env:
+      TEST_REQUIRE_INTEGRATION: "1"
+      TEST_IMAGE: mysql-s3-backup:scan
+      TEST_S3_ENDPOINT: http://127.0.0.1:7070
+      TEST_MYSQL_HOST: 127.0.0.1
+      TEST_MYSQL_PORT: "3306"
+      TEST_MYSQL_USER: root
+      TEST_MYSQL_PASSWORD: rootpw
+      AWS_ACCESS_KEY_ID: testkey
+      AWS_SECRET_ACCESS_KEY: testsecret123
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
 
-      # Build the actual image (amd64) and load it locally so Trivy can scan the
-      # built layers. The filesystem scan above only sees repo files; it cannot
-      # catch CVEs in the Alpine base packages or in the s5cmd Go binary — which
-      # is exactly where the findings in issue #7 lived.
-      - name: Build image for scanning
+      - name: Build image
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
@@ -54,7 +170,8 @@ jobs:
 
       # ignore-unfixed: only fail on CVEs that have an upstream fix available
       # (the actionable set). Without it, an unfixable upstream CVE would block
-      # every build until the dependency cuts a release.
+      # every build until the dependency cuts a release. The binary is built
+      # with cargo-auditable, so this covers its Rust crates as well as Alpine.
       - name: Run Trivy image scan
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
@@ -63,6 +180,32 @@ jobs:
           severity: CRITICAL,HIGH
           ignore-unfixed: true
           exit-code: 1
+
+      - name: Install the MariaDB client
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends mariadb-client
+
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+        with:
+          toolchain: stable
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      - name: Build the test harness
+        run: cargo test --test integration --locked --no-run
+
+      - name: Wait for the database and S3
+        run: |
+          for _ in $(seq 1 60); do
+            if MYSQL_PWD=rootpw mariadb -h 127.0.0.1 -u root -e 'SELECT 1' >/dev/null 2>&1 \
+                && curl -s -o /dev/null http://127.0.0.1:7070; then
+              exit 0
+            fi
+            sleep 2
+          done
+          exit 1
+
+      - name: End-to-end tests through the image
+        run: cargo test --test integration --locked -- --test-threads=4
 
   semgrep:
     name: Semgrep SAST

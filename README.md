@@ -1,118 +1,116 @@
-# MySQL Backup Service
+# mysql-s3-backup
 
 [![CI](https://github.com/joanfabregat/mysql-s3-backup/actions/workflows/ci.yml/badge.svg)](https://github.com/joanfabregat/mysql-s3-backup/actions/workflows/ci.yml)
 [![Build and push Docker image](https://github.com/joanfabregat/mysql-s3-backup/actions/workflows/docker-image.yml/badge.svg)](https://github.com/joanfabregat/mysql-s3-backup/actions/workflows/docker-image.yml)
+[![GitHub release](https://img.shields.io/github/v/release/joanfabregat/mysql-s3-backup?include_prereleases&sort=semver)](https://github.com/joanfabregat/mysql-s3-backup/releases)
 [![Docker Pulls](https://img.shields.io/docker/pulls/joanfabregat/mysql-s3-backup)](https://hub.docker.com/r/joanfabregat/mysql-s3-backup)
 [![Docker Image Size](https://img.shields.io/docker/image-size/joanfabregat/mysql-s3-backup/latest)](https://hub.docker.com/r/joanfabregat/mysql-s3-backup)
-[![GitHub release](https://img.shields.io/github/v/release/joanfabregat/mysql-s3-backup)](https://github.com/joanfabregat/mysql-s3-backup/releases)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Rust](https://img.shields.io/badge/rust-1.94.1%2B-orange?logo=rust)](Cargo.toml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-A containerized solution for automated MySQL database backups to Amazon S3 and S3-compatible storage providers (Backblaze B2, MinIO, etc.).
+A container that backs up MySQL and MariaDB databases to Amazon S3 or any S3-compatible provider (Backblaze B2, Garage, MinIO, …). It runs `mysqldump`, gzips the output, and streams it to the bucket as a multipart upload, without writing the dump to disk.
 
-## Overview
+## How it works
 
-This service provides a reliable way to backup MySQL databases to Amazon S3 or any S3-compatible storage provider (Backblaze B2, MinIO, etc.). It creates compressed database dumps and uploads them to a specified bucket. Retention policies can be configured using bucket lifecycle rules.
+A small Rust binary drives the backup. `mysqldump` (from Alpine's `mariadb-client`) still produces the dump; the binary handles the rest:
+
+1. Runs `mysqldump` for one database and reads its output through a pipe.
+2. Compresses it with gzip into a buffer the size of one upload part (16 MiB by default).
+3. Each time the buffer fills, sends it to S3 as the next part of a multipart upload, two parts at a time.
+4. Sends `CompleteMultipartUpload` only after `mysqldump` has exited 0.
+
+Until step 4, S3 holds only invisible parts, not an object. If `mysqldump` fails, stalls past its timeout, or the container is stopped, the binary sends `AbortMultipartUpload` and the parts are discarded. **A truncated dump never becomes an object**, which matters when the bucket is under Object Lock and a bad object cannot be deleted.
+
+Memory, not disk, bounds the work: at most three parts are held at once (one filling, two uploading), so 48 MiB of buffers at the default part size, whatever the database size. If the upload is slower than the dump, reading pauses and `mysqldump` waits on the pipe; the log reports how long, because with the default locking mode the table locks stay held while it waits (see [Dump consistency and locking](#dump-consistency-and-locking)).
 
 ## Features
 
-- MySQL database dumping via `mysqldump` (with `--no-tablespaces` flag)
-- Optional `--single-transaction` dumps, so backups don't block writes (see [Dump consistency and locking](#dump-consistency-and-locking))
-- Support for both TCP and Unix socket connections
-- Automatic compression of database dumps using gzip
-- Upload to Amazon S3 or any S3-compatible provider (Backblaze B2, MinIO, etc.) via [`s5cmd`](https://github.com/peak/s5cmd)
-- Configurable storage class (defaults to STANDARD_IA, can be disabled for non-AWS providers)
-- Configurable S3 bucket path prefixing
-- Timestamp-based backup naming for easy sorting and identification
-- Automatic cleanup of local temporary files
-- Retry mechanism for S3 uploads (3 attempts with 5s delay)
-- Support for DATABASE_URL connection strings
-- Multi-database backup via comma-separated `MYSQL_DATABASE`
-- Multi-architecture Docker images (amd64, arm64)
-
-## Requirements
-
-- Docker
-- S3-compatible storage bucket (AWS S3, Backblaze B2, MinIO, etc.)
-- Credentials with write access to the bucket
-- MySQL/MariaDB database
+- Streams dumps to S3 with no local disk use, and never leaves a partial object behind
+- Optional `--single-transaction` dumps that do not block writes, with a warning that names tables it cannot snapshot
+- TCP or Unix socket connections, individual variables or a `DATABASE_URL`
+- Several databases per run, through a comma-separated `MYSQL_DATABASE`
+- Any S3-compatible provider through `S3_ENDPOINT_URL`, with path-style addressing
+- A Content-MD5 on every part, checked by the provider
+- Wall-clock timeouts that fit inside a Kubernetes Job's `activeDeadlineSeconds`
+- Clean shutdown on `SIGTERM`: `mysqldump` is stopped and the upload aborted
+- The database password goes through `MYSQL_PWD`, never the command line
+- Multi-architecture images (`linux/amd64`, `linux/arm64`), with a binary built by `cargo-auditable` so image scanners see its Rust dependencies
 
 ## Configuration
 
-The service is configured using environment variables:
+Everything is configured through environment variables.
 
-### Database Connection
+### Database
 
-Configure one of the following:
-
-**Option 1: Using DATABASE_URL**
-```
-DATABASE_URL=mysql://user:password@hostname:port/database?unix_socket=/path/to/socket
-```
-
-**Option 2: Using individual parameters**
-```
-MYSQL_HOST=hostname
-MYSQL_PORT=3306 (optional, defaults to 3306)
-MYSQL_USER=username
-MYSQL_PASSWORD=password
-MYSQL_DATABASE=database (supports comma-separated list, e.g. db1,db2)
-MYSQL_SOCKET=/path/to/socket (optional, for Unix socket connections)
-MYSQL_SINGLE_TRANSACTION=0 (optional, defaults to 0; see Dump consistency and locking)
-```
-
-### S3 / Storage Configuration
+Either a `DATABASE_URL`:
 
 ```
-S3_BUCKET=your-bucket-name
-S3_PREFIX=backups/mysql (optional, defaults to root)
-S3_ENDPOINT_URL=https://s3.us-west-004.backblazeb2.com (optional, for S3-compatible providers)
-S3_STORAGE_CLASS=STANDARD_IA (optional, defaults to STANDARD_IA; set to empty string to disable)
-AWS_ACCESS_KEY_ID=your-access-key
-AWS_SECRET_ACCESS_KEY=your-secret-key
-AWS_DEFAULT_REGION=us-west-1
+DATABASE_URL=mysql://user:password@hostname:3306/database
+DATABASE_URL=mysql://user:password@/database?unix_socket=/run/mysqld/mysqld.sock
 ```
+
+or individual variables:
+
+| Variable | Default | Description |
+|---|---|---|
+| `MYSQL_HOST` | | Server host name. Required unless `MYSQL_SOCKET` is set. |
+| `MYSQL_PORT` | `3306` | Server port. |
+| `MYSQL_SOCKET` | | Unix socket path. Takes precedence over `MYSQL_HOST`. |
+| `MYSQL_USER` | | Required. |
+| `MYSQL_PASSWORD` | | Passed to `mysqldump` through `MYSQL_PWD`. |
+| `MYSQL_DATABASE` | | Required. A comma-separated list backs up each database in turn. |
+| `MYSQL_SINGLE_TRANSACTION` | `0` | Dump with `--single-transaction`. Accepts `1`/`0`, `true`/`false`, `yes`/`no`, `on`/`off`; anything else is rejected at startup. See [Dump consistency and locking](#dump-consistency-and-locking). |
+
+`DATABASE_URL` overrides the user, password, host and database variables. The port and socket from the URL apply only when present in it. The URL is not percent-decoded: write the password as it is.
+
+### S3
+
+| Variable | Default | Description |
+|---|---|---|
+| `S3_BUCKET` | | Required. |
+| `S3_PREFIX` | `/` | Key prefix, for example `backups/mysql`. |
+| `S3_ENDPOINT_URL` | | Endpoint of an S3-compatible provider. Enables path-style addressing. |
+| `S3_STORAGE_CLASS` | `STANDARD_IA` | Set it to an empty string for providers that reject storage classes (B2, Garage, MinIO). |
+| `S3_PART_SIZE_MIB` | `16` | Upload part size, 5 to 5120. S3 allows 10,000 parts, so the default handles dumps up to about 156 GiB compressed. Memory use is about three times this value. |
+| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | | Credentials. Any source the AWS SDK supports also works: IRSA, EKS Pod Identity, ECS task roles, instance profiles, `AWS_PROFILE`. |
+| `AWS_REGION` or `AWS_DEFAULT_REGION` | `us-east-1` | Bucket region. |
+
+### Timeouts
+
+| Variable | Default | Description |
+|---|---|---|
+| `DUMP_TIMEOUT` | `600` | Seconds allowed for one attempt at one database, dump and upload together. |
+| `UPLOAD_TIMEOUT` | `300` | Seconds allowed for each S3 request attempt. |
+| `TIMEOUT_GRACE` | `30` | Seconds between `SIGTERM` and `SIGKILL` when stopping `mysqldump`. |
+
+## Timeouts, retries and Kubernetes deadlines
+
+Without timeouts, a stalled dump or upload hangs forever, and on Kubernetes a CronJob with `concurrencyPolicy: Forbid` then skips every later run while looking idle. A Job-level `activeDeadlineSeconds` is the outer net; these timeouts are the inner one, and they say which step stalled.
+
+- **A failed dump is not retried.** `mysqldump` exiting non-zero, or an attempt running past `DUMP_TIMEOUT`, ends the run with exit code 1.
+- **A failed upload is retried once, with a fresh dump**, 5 seconds later. The SDK already retries each S3 request up to 3 times; this covers what that cannot.
+- With `MYSQL_SINGLE_TRANSACTION` enabled, a 30-second engine check runs before each database.
+
+Worst case per database: `2 × DUMP_TIMEOUT`, plus 30 s with `MYSQL_SINGLE_TRANSACTION`. At the defaults that is 1,230 s, and the total is that times the number of databases. **Keep it inside the Job's `activeDeadlineSeconds`**, or the deadline always fires first and these timeouts never get to say what stalled. For scale, a ~924 MiB gzipped database dumps and uploads in about two minutes, so 600 s is about 5× that. Raise `DUMP_TIMEOUT` for a larger database, and raise `activeDeadlineSeconds` to match.
 
 ## Dump consistency and locking
 
-By default `mysqldump` runs with `--lock-tables` (part of `--opt`): it takes
-`LOCK TABLES … READ LOCAL` over every table in a database and holds it for that
-database's entire dump. **Writes to those tables block for as long as the dump
-takes** — minutes on a large schema. In exchange, every table in the dump comes
-from the same point in time, whatever storage engine it uses.
+By default `mysqldump` runs with `--lock-tables` (part of `--opt`): it takes `LOCK TABLES … READ LOCAL` over every table in a database and holds it for that database's whole dump. **Writes to those tables block for as long as the dump takes**, including any time spent waiting on a slow upload. In exchange, every table comes from the same point in time, whatever its storage engine.
 
-Setting `MYSQL_SINGLE_TRANSACTION=1` adds `--single-transaction`, which reads
-inside a transaction instead of locking. Writes are never blocked, and the backup
-user no longer needs `LOCK TABLES`.
+`MYSQL_SINGLE_TRANSACTION=1` adds `--single-transaction`, which reads inside a transaction instead of locking. Writes are never blocked, and the backup user no longer needs `LOCK TABLES`.
 
-The catch: **`--single-transaction` is only a consistent snapshot of
-transactional tables.** InnoDB tables are safe. MyISAM, Aria and MEMORY tables
-are read outside the transaction, so a write landing mid-dump can tear them —
-silently, with nothing in the dump to indicate it. That is why this is opt-in and
-off by default: a backup tool should not quietly downgrade what "a valid backup"
-means on an image pull.
-
-Accepted values are `1`/`0`, `true`/`false`, `yes`/`no`, `on`/`off`. Anything
-else is rejected at startup rather than being silently treated as off.
-
-### Which one to use
+The catch: **`--single-transaction` is only a consistent snapshot of transactional tables.** InnoDB tables are safe. MyISAM, Aria and MEMORY tables are read outside the transaction, so a write landing mid-dump can tear them silently. That is why it is off by default.
 
 | | `MYSQL_SINGLE_TRANSACTION=0` (default) | `MYSQL_SINGLE_TRANSACTION=1` |
 |---|---|---|
 | Writes during the dump | Blocked | Not blocked |
 | InnoDB consistency | Yes | Yes |
-| MyISAM / Aria / MEMORY consistency | Yes | **No — can be torn** |
+| MyISAM / Aria / MEMORY consistency | Yes | **No, can be torn** |
 | Grants needed | `SELECT, SHOW VIEW, TRIGGER, LOCK TABLES` | `SELECT, SHOW VIEW, TRIGGER` |
 
-**All-InnoDB deployment:** enable it. There is no downside.
+**All-InnoDB deployment:** enable it. **Mixed engines:** convert the remaining tables to InnoDB (it has supported `FULLTEXT` since MySQL 5.6, the usual reason a MyISAM table is still around); until then, leaving it off trades a known cost for a known guarantee.
 
-**Mixed engines:** the right fix is usually converting the remaining tables to
-InnoDB — InnoDB has supported `FULLTEXT` since MySQL 5.6, which is the common
-reason a MyISAM table is still around. Until then, leaving this off trades a
-known cost (the write stall) for a known guarantee.
-
-When enabled, the script queries `information_schema` before each dump and logs
-any non-InnoDB table it finds, so a mixed schema shows up in the backup log
-rather than in a failed restore:
+When enabled, the binary queries `information_schema` before each dump and logs every non-InnoDB table, so a mixed schema shows up in the backup log rather than in a failed restore:
 
 ```
 Dumping MySQL database: mixeddb
@@ -124,32 +122,21 @@ Warning: convert them to InnoDB, or unset MYSQL_SINGLE_TRANSACTION to lock inste
 
 The check is advisory: if it cannot run, it warns and the backup proceeds.
 
-Note that **neither mode gives a consistent snapshot across databases.** With a
-comma-separated `MYSQL_DATABASE`, each database is dumped by its own `mysqldump`
-invocation, so each gets its own lock or transaction window and they do not line
-up with each other.
-
-## Installation
-
-Pull the image from Docker Hub:
-
-```bash
-docker pull joanfabregat/mysql-s3-backup
-```
+**Neither mode gives a consistent snapshot across databases.** Each database in a comma-separated `MYSQL_DATABASE` gets its own `mysqldump`, so its own lock or transaction window.
 
 ## Usage
 
-### Docker Run
+### Docker
 
 ```bash
-docker run \
-  -e DATABASE_URL="mysql://user:password@hostname:3306/database" \
+docker run --rm \
+  -e DATABASE_URL="mysql://backup:password@db.example.com:3306/app" \
   -e S3_BUCKET="my-backup-bucket" \
   -e S3_PREFIX="mysql/daily" \
-  -e AWS_ACCESS_KEY_ID="your-access-key" \
-  -e AWS_SECRET_ACCESS_KEY="your-secret-key" \
-  -e AWS_DEFAULT_REGION="us-west-1" \
-  joanfabregat/mysql-s3-backup
+  -e AWS_ACCESS_KEY_ID="..." \
+  -e AWS_SECRET_ACCESS_KEY="..." \
+  -e AWS_REGION="us-west-1" \
+  joanfabregat/mysql-s3-backup:v4
 ```
 
 ### Docker Compose
@@ -157,67 +144,29 @@ docker run \
 ```yaml
 services:
   mysql-backup:
-    image: joanfabregat/mysql-s3-backup
+    image: joanfabregat/mysql-s3-backup:v4
     environment:
-      - MYSQL_HOST=db
-      - MYSQL_PORT=3306
-      - MYSQL_USER=backup_user
-      - MYSQL_PASSWORD=backup_password
-      - MYSQL_DATABASE=my_database
-      - S3_BUCKET=my-backup-bucket
-      - S3_PREFIX=backups/mysql
-      - AWS_ACCESS_KEY_ID=your-access-key
-      - AWS_SECRET_ACCESS_KEY=your-secret-key
-      - AWS_DEFAULT_REGION=us-west-1
+      MYSQL_HOST: db
+      MYSQL_USER: backup
+      MYSQL_PASSWORD: password
+      MYSQL_DATABASE: app,analytics
+      S3_BUCKET: my-backup-bucket
+      S3_PREFIX: backups/mysql
+      AWS_ACCESS_KEY_ID: ...
+      AWS_SECRET_ACCESS_KEY: ...
+      AWS_REGION: us-west-1
 ```
 
-To back up multiple databases in a single run:
+### Backblaze B2 and other S3-compatible providers
 
 ```yaml
-services:
-  mysql-backup:
-    image: joanfabregat/mysql-s3-backup
     environment:
-      - MYSQL_HOST=db
-      - MYSQL_USER=backup_user
-      - MYSQL_PASSWORD=backup_password
-      - MYSQL_DATABASE=app_db,analytics_db
-      - S3_BUCKET=my-backup-bucket
-      - S3_PREFIX=backups/mysql
-      - AWS_ACCESS_KEY_ID=your-access-key
-      - AWS_SECRET_ACCESS_KEY=your-secret-key
-      - AWS_DEFAULT_REGION=us-west-1
+      S3_ENDPOINT_URL: https://s3.us-west-004.backblazeb2.com
+      S3_STORAGE_CLASS: ""
+      AWS_REGION: us-west-004
 ```
 
-### Backblaze B2
-
-```yaml
-services:
-  mysql-backup:
-    image: joanfabregat/mysql-s3-backup
-    environment:
-      - MYSQL_HOST=db
-      - MYSQL_USER=backup_user
-      - MYSQL_PASSWORD=backup_password
-      - MYSQL_DATABASE=my_database
-      - S3_BUCKET=my-b2-bucket
-      - S3_PREFIX=backups/mysql
-      - S3_ENDPOINT_URL=https://s3.us-west-004.backblazeb2.com
-      - S3_STORAGE_CLASS=
-      - AWS_ACCESS_KEY_ID=your-b2-application-key-id
-      - AWS_SECRET_ACCESS_KEY=your-b2-application-key
-      - AWS_DEFAULT_REGION=us-west-004
-```
-
-## Scheduled Backups
-
-To run scheduled backups, you can:
-
-1. Use Kubernetes CronJob
-2. Deploy with Docker and use the host's cron to schedule container execution
-3. Implement scheduling logic in your container orchestration system
-
-### Example Kubernetes CronJob
+### Kubernetes CronJob
 
 ```yaml
 apiVersion: batch/v1
@@ -225,95 +174,115 @@ kind: CronJob
 metadata:
   name: mysql-backup
 spec:
-  schedule: "0 2 * * *"  # Run daily at 2 AM
+  schedule: "0 2 * * *"
+  concurrencyPolicy: Forbid
   jobTemplate:
     spec:
+      activeDeadlineSeconds: 3600
+      backoffLimit: 0
       template:
         spec:
+          restartPolicy: Never
           containers:
-          - name: mysql-backup
-            image: joanfabregat/mysql-s3-backup
-            env:
-            - name: MYSQL_HOST
-              value: "db-service"
-            - name: MYSQL_USER
-              valueFrom:
-                secretKeyRef:
-                  name: mysql-backup-secrets
-                  key: username
-            - name: MYSQL_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: mysql-backup-secrets
-                  key: password
-            - name: MYSQL_DATABASE
-              value: "production_db"
-            - name: S3_BUCKET
-              value: "company-backups"
-            - name: S3_PREFIX
-              value: "mysql/daily"
-            - name: AWS_ACCESS_KEY_ID
-              valueFrom:
-                secretKeyRef:
-                  name: aws-secrets
-                  key: access_key
-            - name: AWS_SECRET_ACCESS_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: aws-secrets
-                  key: secret_key
-            - name: AWS_DEFAULT_REGION
-              value: "us-west-1"
-          restartPolicy: OnFailure
+            - name: mysql-backup
+              image: joanfabregat/mysql-s3-backup:v4
+              resources:
+                requests: { cpu: 250m, memory: 96Mi }
+                limits: { memory: 192Mi }
+              envFrom:
+                - secretRef:
+                    name: mysql-backup
+              env:
+                - name: MYSQL_SINGLE_TRANSACTION
+                  value: "true"
+                - name: S3_PREFIX
+                  value: mysql/daily
 ```
 
-## Output and Logging
+No ephemeral-storage request is needed: nothing is written to disk.
 
-The service provides logs of the backup process. All output goes to stdout/stderr for container logging systems to capture.
+## Objects
 
-Successful backups will be uploaded to your S3 bucket with filenames in the format:
-```
-[S3_PREFIX]/YYYY-MM-DDTHHMMSSz.sql.gz
-```
+One run uses one UTC timestamp for every database:
 
-When backing up multiple databases (comma-separated `MYSQL_DATABASE`), each dump is uploaded under a database-specific subdirectory:
 ```
-[S3_PREFIX]/[DATABASE]/YYYY-MM-DDTHHMMSSz.sql.gz
+<S3_PREFIX>/<YYYY-MM-DDTHHMMSSZ>.sql.gz                 one database
+<S3_PREFIX>/<database>/<YYYY-MM-DDTHHMMSSZ>.sql.gz      several databases
 ```
 
-## Development
+Keys are identical to v3's, so existing lifecycle rules and restore scripts keep working. Restore with:
 
 ```bash
-# Lint the shell script
-shellcheck backup.sh
+aws s3 cp s3://my-backup-bucket/mysql/daily/2026-10-13T020000Z.sql.gz - | gunzip | mariadb app
 ```
 
-## Building the Image
+**Add a lifecycle rule with `AbortIncompleteMultipartUpload`** (one day is enough). Every failure path aborts its upload, but a container killed with `SIGKILL` cannot, and its parts are billed as storage until something removes them.
 
-```bash
-docker build -t joanfabregat/mysql-s3-backup .
+## Logs and exit codes
+
+```
+mysql-s3-backup 4.0.0
+Dumping MySQL database: app
+Streaming dump to S3: s3://my-backup-bucket/mysql/daily/2026-10-13T020000Z.sql.gz
+Uploaded successfully: 924.3 MiB compressed (4121.7 MiB raw) in 58 part(s), 124.6s.
+mysqldump of 'app' waited 3.2s on the upload.
+Backup complete.
 ```
 
-## Security Considerations
+| Exit code | Meaning |
+|---|---|
+| `0` | Every database was backed up. |
+| `1` | Invalid configuration, or a database failed. Databases after it are not attempted. |
+| `130`, `143` | Stopped by `SIGINT` or `SIGTERM`; the current upload was aborted. |
 
-- Use IAM roles when running in AWS environments instead of hardcoded credentials
-- Create a dedicated database user with minimal permissions: `SELECT, SHOW VIEW, TRIGGER, LOCK TABLES`, or `SELECT, SHOW VIEW, TRIGGER` with `MYSQL_SINGLE_TRANSACTION=1` (see [Dump consistency and locking](#dump-consistency-and-locking))
-- Store sensitive environment variables using appropriate secret management solutions
-- Consider encrypting your S3 bucket to protect sensitive data
+## Upgrading from v3
+
+v4 replaces the shell script and `s5cmd` with the Rust binary. The environment variables and object keys are unchanged. What changed:
+
+- **No temporary files.** Remove the ephemeral-storage sizing for `/tmp`; set a memory limit instead (about three times `S3_PART_SIZE_MIB` plus a few MiB).
+- **`DUMP_TIMEOUT` now covers the dump and the upload together**, since they run as one stream. `UPLOAD_TIMEOUT` now applies to each S3 request. Recheck the budget in [Timeouts, retries and Kubernetes deadlines](#timeouts-retries-and-kubernetes-deadlines).
+- **An upload failure retries the whole database** (2 attempts) instead of re-sending the file (3 attempts).
+- **The entrypoint is `/usr/local/bin/mysql-s3-backup`.** `/app/backup.sh`, `bash`, `gzip` and `s5cmd` are gone from the image.
+- **Checksums:** every part carries a Content-MD5. The AWS SDK's CRC checksums are only sent where S3 requires them, because not every compatible provider supports them.
+- **New:** `S3_PART_SIZE_MIB`.
+
+## Security
+
+- Prefer workload identity (IRSA, EKS Pod Identity, instance roles) over static keys.
+- Give the database user only what the dump needs: `SELECT, SHOW VIEW, TRIGGER, LOCK TABLES`, or `SELECT, SHOW VIEW, TRIGGER` with `MYSQL_SINGLE_TRANSACTION=1`.
+- Keep credentials in a secret store, and encrypt the bucket.
+- Consider Object Lock on the bucket; incomplete dumps never become objects, so it cannot lock in a bad one.
 
 ## Troubleshooting
 
-Common issues:
+1. **`Error: dump of '…' failed: mysqldump failed (exit 2)`**: `mysqldump`'s own message is printed just above. Usually a connection, grant or unknown-database error.
+2. **`Access denied … when using LOCK TABLES`**: grant `LOCK TABLES`, or set `MYSQL_SINGLE_TRANSACTION=1`.
+3. **Writes stall during the backup**: `mysqldump`'s default locking. See [Dump consistency and locking](#dump-consistency-and-locking). If the log shows a long wait on the upload, the upload is extending the lock: use `MYSQL_SINGLE_TRANSACTION=1`, or a faster link to the bucket.
+4. **`exceeded 600s (DUMP_TIMEOUT)`**: raise `DUMP_TIMEOUT` and the Job's `activeDeadlineSeconds` together.
+5. **`InvalidStorageClass` or similar on an S3-compatible provider**: set `S3_STORAGE_CLASS=""`.
+6. **Container killed for memory**: raise the memory limit, or lower `S3_PART_SIZE_MIB`.
 
-1. **Connection errors**: Verify database connectivity parameters and network access
-2. **Permission denied**: Ensure the MySQL user has proper permissions for dumping
-3. **S3 upload failures**: Check AWS credentials and bucket write permissions
-4. **Out of space errors**: Ensure enough temporary storage is available
-5. **Writes stall while the backup runs**: This is `mysqldump`'s default table
-   locking. See [Dump consistency and locking](#dump-consistency-and-locking)
-6. **`Access denied … when using LOCK TABLES`**: Either grant `LOCK TABLES` to the
-   backup user, or set `MYSQL_SINGLE_TRANSACTION=1`, which does not need it
+## Development
+
+The code is a single binary crate: `src/config.rs` (environment), `src/dump.rs` (`mysqldump` and the streaming pipeline), `src/s3.rs` (multipart upload).
+
+```bash
+cargo fmt --check
+cargo clippy --all-targets -- -D warnings
+cargo test                     # unit tests; integration tests skip themselves
+docker build -t mysql-s3-backup .
+```
+
+The integration tests in `tests/integration.rs` need an S3-compatible server and, for most of them, a MySQL or MariaDB server and the `mariadb` client on `PATH`:
+
+```bash
+TEST_S3_ENDPOINT=http://127.0.0.1:7070 AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=... \
+TEST_MYSQL_HOST=127.0.0.1 TEST_MYSQL_USER=root TEST_MYSQL_PASSWORD=... \
+TEST_REQUIRE_INTEGRATION=1 cargo test --test integration
+```
+
+Set `TEST_IMAGE=<image>` to run them through a Docker image instead of the Cargo-built binary. CI runs them against MySQL 8.4, MariaDB 11.4 and MariaDB 11.8 with [versitygw](https://github.com/versity/versitygw) as the S3 server, and once more through the built image.
 
 ## License
 
-[MIT License](LICENSE)
+[MIT](LICENSE)
