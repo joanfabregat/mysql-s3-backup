@@ -31,6 +31,10 @@ jobs:
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: joanfabregat/mysql-s3-backup
+          # The default, latest=auto, adds `latest` for every tag push,
+          # prereleases included; the raw rule below is the only source of it.
+          flavor: |
+            latest=false
           tags: |
             type=ref,event=tag
             type=semver,pattern=v{{major}}.{{minor}},enable=${{ !contains(github.ref, '-') }}
