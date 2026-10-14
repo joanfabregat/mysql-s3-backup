@@ -1,0 +1,52 @@
+name: Retag Docker image
+
+# Points a Docker Hub tag at an image that is already published, without a
+# rebuild, so the digest stays the same. Used to move `latest` back to a
+# previous release.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag to move
+        required: true
+        default: latest
+      source:
+        description: Existing tag (v3.2.3) or digest (sha256:...) to point it at
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  retag:
+    name: Retag
+    runs-on: ubuntu-26.04
+    env:
+      IMAGE: joanfabregat/mysql-s3-backup
+      TAG: ${{ inputs.tag }}
+      SOURCE: ${{ inputs.source }}
+    steps:
+      - name: Validate inputs
+        run: |
+          echo "$TAG" | grep -Eqx '[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}' \
+            || { echo "invalid tag: $TAG"; exit 1; }
+          echo "$SOURCE" | grep -Eqx 'sha256:[0-9a-f]{64}|[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}' \
+            || { echo "invalid source: $SOURCE"; exit 1; }
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Retag
+        run: |
+          case "$SOURCE" in
+            sha256:*) ref="$IMAGE@$SOURCE" ;;
+            *) ref="$IMAGE:$SOURCE" ;;
+          esac
+          docker buildx imagetools create -t "$IMAGE:$TAG" "$ref"
+          docker buildx imagetools inspect "$IMAGE:$TAG"
