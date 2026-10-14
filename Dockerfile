@@ -30,7 +30,7 @@ RUN xx-cargo auditable build --release --locked \
     && xx-verify --static "$target" \
     && cp "$target" /mysql-s3-backup
 
-FROM alpine:3.23
+FROM alpine:3.24
 
 # mariadb-client provides mariadb-dump (mysqldump) and the mariadb client the
 # MYSQL_SINGLE_TRANSACTION engine check uses.
