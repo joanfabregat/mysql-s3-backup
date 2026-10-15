@@ -33,6 +33,7 @@ Memory, not disk, bounds the work: at most three parts are held at once (one fil
 - A Content-MD5 on every part, checked by the provider
 - Wall-clock timeouts that fit inside a Kubernetes Job's `activeDeadlineSeconds`
 - Clean shutdown on `SIGTERM`: `mysqldump` is stopped and the upload aborted
+- A built-in success ping for heartbeat monitors such as UptimeRobot, with no sidecar
 - The database password goes through `MYSQL_PWD`, never the command line
 - Multi-architecture images (`linux/amd64`, `linux/arm64`), with a binary built by `cargo-auditable` so image scanners see its Rust dependencies
 
@@ -83,6 +84,14 @@ or individual variables:
 | `UPLOAD_TIMEOUT` | `300` | Seconds allowed for each S3 request attempt. |
 | `TIMEOUT_GRACE` | `30` | Seconds between `SIGTERM` and `SIGKILL` when stopping `mysqldump`. |
 
+### Heartbeat
+
+| Variable | Default | Description |
+|---|---|---|
+| `HEARTBEAT_URL` | | An `http://` or `https://` URL to GET once every database is uploaded, for a heartbeat monitor (UptimeRobot, Healthchecks.io, Better Stack) that alerts when the ping does not arrive. |
+
+The ping is sent only when the whole run succeeded, so a failed, timed-out or interrupted backup alerts through the missing ping. Each attempt has 10 seconds, and a failed ping is retried twice, 2 seconds apart. **A ping that still fails does not fail the backup**: the run logs a warning and exits 0, because the backup is stored and a non-zero exit would make a Kubernetes Job dump everything again. The monitor alerts on the missing ping anyway. The URL is never logged, since it usually carries the monitor's token; keep it in a Secret.
+
 ## Timeouts, retries and Kubernetes deadlines
 
 Without timeouts, a stalled dump or upload hangs forever, and on Kubernetes a CronJob with `concurrencyPolicy: Forbid` then skips every later run while looking idle. A Job-level `activeDeadlineSeconds` is the outer net; these timeouts are the inner one, and they say which step stalled.
@@ -91,7 +100,7 @@ Without timeouts, a stalled dump or upload hangs forever, and on Kubernetes a Cr
 - **A failed upload is retried once, with a fresh dump**, 5 seconds later. The SDK already retries each S3 request up to 3 times; this covers what that cannot.
 - With `MYSQL_SINGLE_TRANSACTION` enabled, a 30-second engine check runs before each database.
 
-Worst case per database: `2 × DUMP_TIMEOUT`, plus 30 s with `MYSQL_SINGLE_TRANSACTION`. At the defaults that is 1,230 s, and the total is that times the number of databases. **Keep it inside the Job's `activeDeadlineSeconds`**, or the deadline always fires first and these timeouts never get to say what stalled. For scale, a ~924 MiB gzipped database dumps and uploads in about two minutes, so 600 s is about 5× that. Raise `DUMP_TIMEOUT` for a larger database, and raise `activeDeadlineSeconds` to match.
+Worst case per database: `2 × DUMP_TIMEOUT`, plus 30 s with `MYSQL_SINGLE_TRANSACTION`. At the defaults that is 1,230 s, and the total is that times the number of databases, plus 34 s with `HEARTBEAT_URL`. **Keep it inside the Job's `activeDeadlineSeconds`**, or the deadline always fires first and these timeouts never get to say what stalled. For scale, a ~924 MiB gzipped database dumps and uploads in about two minutes, so 600 s is about 5× that. Raise `DUMP_TIMEOUT` for a larger database, and raise `activeDeadlineSeconds` to match.
 
 ## Dump consistency and locking
 
@@ -244,7 +253,7 @@ v4 replaces the shell script and `s5cmd` with the Rust binary. The environment v
 - **An upload failure retries the whole database** (2 attempts) instead of re-sending the file (3 attempts).
 - **The entrypoint is `/usr/local/bin/mysql-s3-backup`.** `/app/backup.sh`, `bash`, `gzip` and `s5cmd` are gone from the image.
 - **Checksums:** every part carries a Content-MD5. The AWS SDK's CRC checksums are only sent where S3 requires them, because not every compatible provider supports them.
-- **New:** `S3_PART_SIZE_MIB`.
+- **New:** `S3_PART_SIZE_MIB`, and `HEARTBEAT_URL`, which replaces a sidecar container that pinged a monitor after the backup.
 
 ## Security
 

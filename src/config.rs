@@ -6,6 +6,10 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
+use hyper::Uri;
+
+use crate::heartbeat;
+
 /// Whole-database attempts. Only a failed upload is retried; a failed or
 /// timed-out dump is not, matching v3.
 pub const MAX_ATTEMPTS: u32 = 2;
@@ -47,6 +51,8 @@ pub struct Config {
     pub upload_timeout: Duration,
     /// Time between TERM and KILL when stopping mysqldump.
     pub timeout_grace: Duration,
+    /// Pinged once every database is uploaded.
+    pub heartbeat_url: Option<Uri>,
 }
 
 struct Vars<'a>(&'a HashMap<String, String>);
@@ -236,6 +242,10 @@ impl Config {
                 false,
             )?,
             timeout_grace: parse_seconds("TIMEOUT_GRACE", vars.get("TIMEOUT_GRACE"), 30, true)?,
+            heartbeat_url: vars
+                .get("HEARTBEAT_URL")
+                .map(heartbeat::parse_url)
+                .transpose()?,
         })
     }
 
@@ -303,6 +313,15 @@ mod tests {
         assert_eq!(cfg.timeout_grace, Duration::from_secs(30));
         assert!(!cfg.single_transaction);
         assert!(cfg.endpoint_url.is_none());
+        assert!(cfg.heartbeat_url.is_none());
+    }
+
+    #[test]
+    fn heartbeat_url() {
+        let cfg = Config::from_vars(&with(&[("HEARTBEAT_URL", "https://hb.example/x")])).unwrap();
+        assert_eq!(cfg.heartbeat_url.unwrap().host(), Some("hb.example"));
+        let err = Config::from_vars(&with(&[("HEARTBEAT_URL", "hb.example/x")])).unwrap_err();
+        assert!(err.starts_with("HEARTBEAT_URL must be"), "{err}");
     }
 
     #[test]

@@ -4,6 +4,7 @@
 
 mod config;
 mod dump;
+mod heartbeat;
 mod s3;
 
 use std::process::ExitCode;
@@ -150,6 +151,9 @@ async fn main() -> ExitCode {
     }
 
     println!("Backup complete.");
+    if let Some(url) = &cfg.heartbeat_url {
+        heartbeat::ping(url).await;
+    }
     ExitCode::SUCCESS
 }
 

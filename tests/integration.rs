@@ -14,10 +14,12 @@
 //!   binary built by Cargo. Tests that replace mysqldump with a fake are
 //!   skipped in that mode.
 
-use std::io::Read;
+use std::io::{Read, Write};
+use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use aws_sdk_s3::Client;
@@ -239,7 +241,6 @@ fn client_program() -> &'static str {
 
 /// Runs SQL through the command-line client and returns its batch output.
 fn sql(database: Option<&str>, input: &[u8]) -> String {
-    use std::io::Write;
     let mut command = Command::new(client_program());
     command
         .args(["--batch", "--skip-column-names"])
@@ -433,6 +434,104 @@ async fn missing_database_fails_without_an_object() {
     );
     assert!(keys(&client, &bucket).await.is_empty());
     assert_eq!(pending_uploads(&client, &bucket).await, 0);
+}
+
+/// A local HTTP server for `HEARTBEAT_URL`. It answers every request with
+/// `status` and records each request line.
+fn heartbeat_server(status: u16) -> (String, Arc<Mutex<Vec<String>>>) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let seen = Arc::clone(&requests);
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { continue };
+            let mut head = Vec::new();
+            let mut byte = [0u8; 1];
+            while !head.ends_with(b"\r\n\r\n") && stream.read(&mut byte).is_ok_and(|n| n == 1) {
+                head.push(byte[0]);
+            }
+            let line = String::from_utf8_lossy(&head)
+                .lines()
+                .next()
+                .unwrap_or_default()
+                .to_owned();
+            seen.lock().unwrap().push(line);
+            let _ = write!(
+                stream,
+                "HTTP/1.1 {status} Status\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            );
+        }
+    });
+    (url, requests)
+}
+
+/// Backs up a seeded database (or a missing one) with `HEARTBEAT_URL` set.
+async fn backup_with_heartbeat(url: &str, database_exists: bool) -> Output {
+    let client = s3().await;
+    let bucket = create_bucket(&client, "heartbeat").await;
+    let db = unique("hb");
+    if database_exists {
+        seed(&db);
+    }
+    let mut extra: Vec<(&str, String)> = db_env();
+    extra.push(("MYSQL_DATABASE", db.clone()));
+    extra.push(("HEARTBEAT_URL", url.to_owned()));
+    let extra: Vec<(&str, &str)> = extra.iter().map(|(k, v)| (*k, v.as_str())).collect();
+    let output = run_backup(&backup_env(&bucket, &extra), None);
+    if database_exists {
+        drop_database(&db);
+    }
+    output
+}
+
+#[tokio::test]
+async fn heartbeat_follows_a_successful_backup() {
+    if !configured("TEST_S3_ENDPOINT") || !configured("TEST_MYSQL_HOST") {
+        return;
+    }
+    let (url, requests) = heartbeat_server(200);
+    let output = backup_with_heartbeat(&format!("{url}/ping/secret-token?s=1"), true).await;
+    assert!(output.status.success());
+    assert_eq!(
+        *requests.lock().unwrap(),
+        ["GET /ping/secret-token?s=1 HTTP/1.1"]
+    );
+    assert!(stdout(&output).contains("Heartbeat sent."));
+    // The URL usually carries the monitor's token: it must not be logged.
+    assert!(!stdout(&output).contains("secret-token"));
+    assert!(!stderr(&output).contains("secret-token"));
+}
+
+#[tokio::test]
+async fn failed_backup_sends_no_heartbeat() {
+    if !configured("TEST_S3_ENDPOINT") || !configured("TEST_MYSQL_HOST") {
+        return;
+    }
+    let (url, requests) = heartbeat_server(200);
+    let output = backup_with_heartbeat(&url, false).await;
+    assert_eq!(output.status.code(), Some(1));
+    assert!(requests.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn heartbeat_failure_does_not_fail_the_backup() {
+    if !configured("TEST_S3_ENDPOINT") || !configured("TEST_MYSQL_HOST") {
+        return;
+    }
+    let (url, requests) = heartbeat_server(503);
+    let output = backup_with_heartbeat(&url, true).await;
+    assert!(output.status.success());
+    assert_eq!(requests.lock().unwrap().len(), 3);
+    let err = stderr(&output);
+    assert!(
+        err.contains("Warning: heartbeat attempt 3 of 3 failed: HTTP 503"),
+        "{err}"
+    );
+    assert!(
+        err.contains("Warning: the heartbeat was not delivered; the backup itself succeeded"),
+        "{err}"
+    );
 }
 
 fn fake_env<'a>(extra: &[(&'a str, &'a str)]) -> Vec<(&'a str, &'a str)> {
