@@ -20,7 +20,7 @@ hyper = { version = "1", default-features = false }
 hyper-rustls = { version = "0.27", default-features = false, features = ["aws-lc-rs", "http1", "native-tokio", "tls12"] }
 hyper-util = { version = "0.1", features = ["client-legacy", "http1", "tokio"] }
 libc = "0.2"
-md-5 = "0.10"
+md-5 = "0.11"
 tokio = { version = "1", features = ["io-util", "macros", "process", "rt-multi-thread", "signal", "sync", "time"] }
 
 [profile.release]
