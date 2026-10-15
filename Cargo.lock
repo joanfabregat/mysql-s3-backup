@@ -1342,13 +1342,17 @@ dependencies = [
 
 [[package]]
 name = "mysql-s3-backup"
-version = "4.0.0-beta.1"
+version = "4.0.0-beta.2"
 dependencies = [
  "anyhow",
  "aws-config",
  "aws-sdk-s3",
  "aws-smithy-types",
  "flate2",
+ "http-body-util",
+ "hyper",
+ "hyper-rustls",
+ "hyper-util",
  "libc",
  "md-5 0.10.6",
  "tokio",
