@@ -100,7 +100,7 @@ Without timeouts, a stalled dump or upload hangs forever, and on Kubernetes a Cr
 - **A failed upload is retried once, with a fresh dump**, 5 seconds later. The SDK already retries each S3 request up to 3 times; this covers what that cannot.
 - With `MYSQL_SINGLE_TRANSACTION` enabled, a 30-second engine check runs before each database.
 
-Worst case per database: `2 × DUMP_TIMEOUT`, plus 30 s with `MYSQL_SINGLE_TRANSACTION`. At the defaults that is 1,230 s, and the total is that times the number of databases, plus 34 s with `HEARTBEAT_URL`. **Keep it inside the Job's `activeDeadlineSeconds`**, or the deadline always fires first and these timeouts never get to say what stalled. For scale, a ~924 MiB gzipped database dumps and uploads in about two minutes, so 600 s is about 5× that. Raise `DUMP_TIMEOUT` for a larger database, and raise `activeDeadlineSeconds` to match.
+Worst case per database: `2 × DUMP_TIMEOUT`, plus 30 s with `MYSQL_SINGLE_TRANSACTION`. At the defaults that is 1,230 s, and the total is that times the number of databases, plus 34 s with `HEARTBEAT_URL`. **Keep it inside the Job's `activeDeadlineSeconds`**, or the deadline always fires first and these timeouts never get to say what stalled. For scale, a 3.0 GiB gzipped dump (9.4 GB raw) took 155 s to an S3-compatible server on the same LAN, so 600 s is about 4× that. Raise `DUMP_TIMEOUT` for a larger database, and raise `activeDeadlineSeconds` to match.
 
 ## Dump consistency and locking
 
@@ -229,6 +229,8 @@ aws s3 cp s3://my-backup-bucket/mysql/daily/2026-10-13T020000Z.sql.gz - | gunzip
 
 ## Logs and exit codes
 
+A run with `HEARTBEAT_URL` set logs:
+
 ```
 mysql-s3-backup 4.0.0
 Dumping MySQL database: app
@@ -236,6 +238,7 @@ Streaming dump to S3: s3://my-backup-bucket/mysql/daily/2026-10-13T020000Z.sql.g
 Uploaded successfully: 924.3 MiB compressed (4121.7 MiB raw) in 58 part(s), 124.6s.
 mysqldump of 'app' waited 3.2s on the upload.
 Backup complete.
+Heartbeat sent.
 ```
 
 | Exit code | Meaning |
@@ -273,7 +276,7 @@ v4 replaces the shell script and `s5cmd` with the Rust binary. The environment v
 
 ## Development
 
-The code is a single binary crate: `src/config.rs` (environment), `src/dump.rs` (`mysqldump` and the streaming pipeline), `src/s3.rs` (multipart upload).
+The code is a single binary crate: `src/config.rs` (environment), `src/dump.rs` (`mysqldump` and the streaming pipeline), `src/s3.rs` (multipart upload), `src/heartbeat.rs` (the success ping).
 
 ```bash
 cargo fmt --check
