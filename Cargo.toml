@@ -1,6 +1,6 @@
 [package]
 name = "mysql-s3-backup"
-version = "4.0.0-beta.2"
+version = "4.0.0"
 edition = "2024"
 rust-version = "1.94.1"
 description = "Stream mysqldump backups to Amazon S3 and S3-compatible storage"

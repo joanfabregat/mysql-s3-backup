@@ -49,3 +49,25 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+
+  # Docker Hub shows its own copy of the README; refresh it with each stable
+  # release so it describes the image `latest` points at.
+  hub_description:
+    name: Update Docker Hub description
+    needs: push_to_registry
+    if: ${{ !contains(github.ref, '-') && startsWith(github.ref, 'refs/tags/') }}
+    runs-on: ubuntu-26.04
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Update Docker Hub description
+        uses: peter-evans/dockerhub-description@1b9a80c056b620d92cedb9d9b5a223409c68ddfa # v5.0.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          repository: joanfabregat/mysql-s3-backup
+          short-description: Stream mysqldump backups of MySQL and MariaDB to S3 and S3-compatible storage
+          readme-filepath: ./README.md
+          # Rewrites relative links (LICENSE, Cargo.toml) to GitHub URLs.
+          enable-url-completion: true
