@@ -5,7 +5,7 @@ FROM --platform=$BUILDPLATFORM tonistiigi/xx:1.9.0 AS xx
 
 # The rust:1 tag is deliberate: every rebuild picks up the latest stable
 # toolchain, so a fix only needs a new image, not a Dockerfile edit.
-FROM --platform=$BUILDPLATFORM rust:1-alpine3.23 AS builder
+FROM --platform=$BUILDPLATFORM rust:1-alpine3.24 AS builder
 
 COPY --from=xx / /
 
@@ -30,7 +30,7 @@ RUN xx-cargo auditable build --release --locked \
     && xx-verify --static "$target" \
     && cp "$target" /mysql-s3-backup
 
-FROM alpine:3.23
+FROM alpine:3.24
 
 # mariadb-client provides mariadb-dump (mysqldump) and the mariadb client the
 # MYSQL_SINGLE_TRANSACTION engine check uses.
