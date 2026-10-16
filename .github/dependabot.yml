@@ -1,3 +1,20 @@
+# Dependabot opens NO pull requests in this repo, deliberately.
+#
+# Two independent mechanisms produce Dependabot PRs, and each is switched off
+# by a different lever:
+#
+#   1. Version updates ("a newer release exists"), governed by this file.
+#      Disabled per ecosystem below with `open-pull-requests-limit: 0`.
+#   2. Security updates ("an advisory matches your lockfile"), NOT governed by
+#      this file: `open-pull-requests-limit` does not apply to them. Disabled
+#      at repo level: Settings → Advanced Security → Dependabot security
+#      updates (API: DELETE /repos/{owner}/{repo}/automated-security-fixes).
+#
+# Dependabot alerts stay enabled, and CI runs `cargo audit` and Trivy.
+# Vulnerabilities are triaged and fixed by hand.
+#
+# This file is kept rather than deleted so the ecosystems and settings stay
+# recorded for whenever PRs are turned back on.
 version: 2
 updates:
   - package-ecosystem: cargo
@@ -6,6 +23,7 @@ updates:
       default-days: 7
     schedule:
       interval: weekly
+    open-pull-requests-limit: 0
     groups:
       cargo:
         patterns: ["*"]
@@ -16,6 +34,7 @@ updates:
       default-days: 7
     schedule:
       interval: weekly
+    open-pull-requests-limit: 0
     groups:
       github-actions:
         patterns: ["*"]
@@ -26,3 +45,4 @@ updates:
       default-days: 7
     schedule:
       interval: weekly
+    open-pull-requests-limit: 0
