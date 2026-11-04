@@ -117,9 +117,17 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # Not through setup-trivy: get.trivy.dev stopped resolving on 2026-11-03
+      # (aquasecurity/setup-trivy#42). This fetches the GitHub release instead.
+      - name: Install Trivy
+        uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
+        with:
+          tool: trivy@0.70.0
+
       - name: Run Trivy filesystem scan
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
+          skip-setup-trivy: true
           scan-type: fs
           scan-ref: .
           severity: CRITICAL,HIGH
@@ -168,6 +176,13 @@ jobs:
           load: true
           tags: mysql-s3-backup:scan
 
+      # Not through setup-trivy: get.trivy.dev stopped resolving on 2026-11-03
+      # (aquasecurity/setup-trivy#42). This fetches the GitHub release instead.
+      - name: Install Trivy
+        uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
+        with:
+          tool: trivy@0.70.0
+
       # ignore-unfixed: only fail on CVEs that have an upstream fix available
       # (the actionable set). Without it, an unfixable upstream CVE would block
       # every build until the dependency cuts a release. The binary is built
@@ -175,6 +190,7 @@ jobs:
       - name: Run Trivy image scan
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
+          skip-setup-trivy: true
           scan-type: image
           image-ref: mysql-s3-backup:scan
           severity: CRITICAL,HIGH
