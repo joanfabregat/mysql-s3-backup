@@ -1340,7 +1340,7 @@ dependencies = [
 
 [[package]]
 name = "mysql-s3-backup"
-version = "4.0.1"
+version = "4.0.2"
 dependencies = [
  "anyhow",
  "aws-config",
